@@ -140,10 +140,10 @@ export function VatCalculator({ customerId }: { customerId: string }) {
         if (engineResult.metrics.vatReport) {
           const vr = engineResult.metrics.vatReport as unknown as BtwReport;
           const rawTx: RawTransaction[] = vr.transactions.map((t) => {
-            const dateStr = t.datum || "";
-            const descStr = t.applied_rule?.omschrijving || "Transactie";
-            const amtNum = t.bedrag_incl_input || 0;
-            const ibanStr = t.tegenrekening_iban || undefined;
+            const dateStr = t.date || (t as any).datum || "";
+            const descStr = t.description || t.applied_rule?.omschrijving || "Transactie";
+            const amtNum = t.amount_incl_input || 0;
+            const ibanStr = (t as any).tegenrekening_iban || undefined;
             const stableId = t.id && !t.id.startsWith("tx_")
               ? t.id
               : genereerStabielTransactieId({ date: dateStr, description: descStr, amount_incl: amtNum, tegenrekening_iban: ibanStr });
@@ -499,7 +499,7 @@ export function VatCalculator({ customerId }: { customerId: string }) {
               <div>
                 <p className="text-xs text-ink-500 mb-1 flex items-center gap-1"><Globe className="h-3 w-3" /> Btw Verlegd (EU/Buitenland)</p>
                 <p className="text-sm font-semibold text-ink-800 tabular-nums">
-                  {formatEUR(calc.report.breakdown.verlegde_btw_totaal)}
+                  {formatEUR(calc.report.breakdown.verlegde_btw_rubriek_2a)}
                 </p>
               </div>
             </div>

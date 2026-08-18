@@ -21,7 +21,7 @@ const authenticator = {
     return otpInstance.verifySync({ token, secret, epochTolerance }).valid;
   }
 };
-import { dataStore } from "./src/server/lib/store.js";
+
 import { 
   comparePassword, 
   createSession, 
@@ -2526,12 +2526,12 @@ async function startServer() {
   app.get("/api/owner/stats", requireAuth, async (req: any, res) => {
     if (req.user.role !== "owner") return res.status(403).json({ error: "Geen toegang" });
     const [
-      { data: users },
+      { data: allUsers },
       { data: customers },
       { data: blocked },
       { data: files }
     ] = await Promise.all([
-      supabase.from("accounts").select("id, number, name, status, role, owner_id, created_at, last_login_at").eq("role", "user"),
+      supabase.from("accounts").select("id, number, name, status, role, owner_id, created_at, last_login_at").in("role", ["user", "organization"]),
       supabase.from("accounts").select("id, owner_id").eq("role", "customer"),
       supabase.from("accounts").select("id").eq("status", "blocked"),
       supabase.from("files").select("id, size_bytes")
@@ -2542,7 +2542,10 @@ async function startServer() {
       totalStorageBytes = files.reduce((acc, f) => acc + (f.size_bytes || 0), 0);
     }
 
-    const mappedUsers = (users || []).map(u => {
+    const usersList = (allUsers || []).filter(u => u.role === "user" || String(u.number).startsWith("89"));
+    const orgsList = (allUsers || []).filter(u => u.role === "organization" || String(u.number).startsWith("2"));
+
+    const mappedUsers = (allUsers || []).map(u => {
       const uCusts = (customers || []).filter(c => c.owner_id === u.id);
       return {
         id: u.id,
@@ -2550,6 +2553,7 @@ async function startServer() {
         owner_id: u.owner_id,
         name: u.name,
         status: u.status,
+        role: u.role,
         customerCount: uCusts.length,
         storageBytes: 0,
         createdAt: u.created_at,
@@ -2558,7 +2562,8 @@ async function startServer() {
     });
 
     res.json({
-      userCount: users?.length || 0,
+      userCount: usersList.length,
+      organizationCount: orgsList.length,
       customerCount: customers?.length || 0,
       blockedCount: blocked?.length || 0,
       totalStorageBytes,
@@ -2574,7 +2579,24 @@ async function startServer() {
       .select("id, number, name, status, owner_id, created_at, last_login_at")
       .eq("role", "customer");
     if (error) return res.status(500).json({ error: error.message });
-    res.json({ customers: customers || [] });
+
+    const { data: accounts } = await supabase
+      .from("accounts")
+      .select("id, name, number, role");
+
+    const accMap = new Map<string, any>();
+    (accounts || []).forEach(a => accMap.set(a.id, a));
+
+    const mappedCustomers = (customers || []).map(c => {
+      const ownerAcc = c.owner_id ? accMap.get(c.owner_id) : null;
+      return {
+        ...c,
+        ownerName: ownerAcc ? ownerAcc.name : "Ongekoppeld",
+        ownerNumber: ownerAcc ? ownerAcc.number : null,
+      };
+    });
+
+    res.json({ customers: mappedCustomers });
   });
 
   app.post("/api/owner/assign-customers", requireAuth, async (req: any, res) => {
@@ -2611,22 +2633,22 @@ async function startServer() {
 
   app.get("/api/owner/users", requireAuth, async (req: any, res) => {
     if (req.user.role !== "owner") return res.status(403).json({ error: "Geen toegang" });
-    const { data: users } = await supabase.from("accounts").select("id, number, name, status, role, owner_id, created_at, last_login_at, two_factor_enabled, last_2fa_verified_at").eq("role", "user");
+    const { data: users } = await supabase.from("accounts").select("id, number, name, status, role, owner_id, created_at, last_login_at, two_factor_enabled, last_2fa_verified_at").in("role", ["user", "organization"]);
     const { data: customers } = await supabase.from("accounts").select("id, owner_id").eq("role", "customer");
 
     const userList = users || [];
     const customerList = customers || [];
 
-    // Build org lookup map for organizations (number starting with 2)
+    // Build org lookup map for organizations (number starting with 2 or role === organization)
     const orgMap = new Map<string, string>();
     userList.forEach(u => {
-      if (String(u.number).startsWith("2")) {
+      if (u.role === "organization" || String(u.number).startsWith("2")) {
         orgMap.set(u.id, u.name);
       }
     });
 
     const mappedUsers = userList.map(u => {
-      const isOrg = String(u.number).startsWith("2");
+      const isOrg = u.role === "organization" || String(u.number).startsWith("2");
       let userCount = 0;
       let customerCount = 0;
 
@@ -2646,6 +2668,7 @@ async function startServer() {
         number: u.number,
         name: u.name,
         status: u.status,
+        role: u.role,
         owner_id: u.owner_id,
         organizationName,
         userCount: isOrg ? userCount : undefined,
@@ -2720,7 +2743,7 @@ async function startServer() {
       // 1. Create Org
       const orgHash = await bcrypt.hash(org.password, 10);
       const { data: orgAccount, error: orgErr } = await supabase.from("accounts").insert({
-        number: org.number, name: org.name, role: "user", status: "active", owner_id: req.user.id
+        number: org.number, name: org.name, role: "organization", status: "active", owner_id: req.user.id
       }).select().single();
       if (orgErr || !orgAccount) throw new Error(orgErr?.message || "Fout bij aanmaken organisatie.");
       createdAccountIds.push(orgAccount.id);
@@ -2789,13 +2812,14 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
       return res.status(400).json({ error: "Naam mag maximaal 80 tekens lang zijn" });
     }
     
+    const role = number.startsWith("2") ? "organization" : "user";
     const { data: existing } = await supabase.from("accounts").select("id").eq("number", number).single();
     if (existing) return res.status(400).json({ error: "Dit accountnummer is al in gebruik." });
 
     const hash = await bcrypt.hash(password, 10);
     
     const { data: account, error: accErr } = await supabase.from("accounts").insert({
-      number, name, role: "user", status: "active"
+      number, name, role, status: "active"
     }).select().single();
     
     if (accErr || !account) return res.status(500).json({ error: accErr?.message || "Fout bij aanmaken gebruiker." });

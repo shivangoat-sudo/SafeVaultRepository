@@ -147,7 +147,7 @@ export async function processFiles(files: File[]): Promise<EngineResult> {
         btw_eindsaldo: 0,
         totalRevenueIncl: 0, totalRevenueExcl: 0, outputVat21: 0, outputVat9: 0, totalOutputVat: 0, deductibleInputVat21: 0, deductibleInputVat9: 0, totalDeductibleInputVat: 0, nonDeductibleVatBUA: 0, euVerlegdVat: 0, netVatResult: 0, totalRowsProcessed: 0, rowsRequiringReview: 0
       }, 
-      validation: {}, reviewQueue: [], auditTrail: [] 
+      validation: { status: "success", validation_runs: 0 }, reviewQueue: [], auditTrail: [] 
     };
   }
   return processFile(files[0]);

@@ -15,13 +15,14 @@ import {
   Building2, Search, User, X,
 } from "lucide-react";
 
-type Tab = "overview" | "organizations" | "users" | "warnings" | "blocked" | "logs" | "settings";
+type Tab = "overview" | "organizations" | "users" | "customers" | "warnings" | "blocked" | "logs" | "settings";
 
 export function OwnerDashboard() {
   const { account } = useAuth();
   const [tab, setTab] = useState<Tab>("overview");
   const [stats, setStats] = useState<OwnerStats | null>(null);
   const [users, setUsers] = useState<OwnerUser[]>([]);
+  const [customers, setCustomers] = useState<CustomerItem[]>([]);
   const [warnings, setWarnings] = useState<WarningLog[]>([]);
   const [blocked, setBlocked] = useState<BlockedAccount[]>([]);
   const [logs, setLogs] = useState<WarningLog[]>([]);
@@ -42,9 +43,10 @@ export function OwnerDashboard() {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, u, w, b, l, st, n] = await Promise.all([
+      const [s, u, custRes, w, b, l, st, n] = await Promise.all([
         api.ownerStats().catch(() => null),
         api.ownerUsers().catch(() => ({ users: [] })),
+        api.ownerCustomers().catch(() => ({ customers: [] })),
         api.ownerWarnings().catch(() => ({ warnings: [] })),
         api.ownerBlocked().catch(() => ({ blocked: [] })),
         api.ownerLogs().catch(() => ({ logs: [] })),
@@ -53,6 +55,7 @@ export function OwnerDashboard() {
       ]);
 
       const usersList = u?.users || [];
+      const customersList = custRes?.customers || [];
       const warningsList = w?.warnings || [];
       const blockedList = b?.blocked || [];
       const logsList = l?.logs || [];
@@ -61,7 +64,7 @@ export function OwnerDashboard() {
       setStats(s || {
         userCount: usersList.filter((u: OwnerUser) => String(u.number).startsWith("89")).length,
         organizationCount: usersList.filter((u: OwnerUser) => String(u.number).startsWith("2")).length,
-        customerCount: 0,
+        customerCount: customersList.length,
         blockedCount: blockedList.length,
         totalStorageBytes: 0,
         fileCount: 0,
@@ -69,6 +72,7 @@ export function OwnerDashboard() {
       });
 
       setUsers(usersList);
+      setCustomers(customersList);
       setWarnings(warningsList);
       setBlocked(blockedList);
       setLogs(logsList);
@@ -102,6 +106,7 @@ export function OwnerDashboard() {
     { label: "Overzicht", icon: LayoutDashboard, active: tab === "overview", onClick: () => setTab("overview") },
     { label: "Organisaties", icon: Building2, active: tab === "organizations", onClick: () => setTab("organizations") },
     { label: "Gebruikers", icon: Users, active: tab === "users", onClick: () => setTab("users") },
+    { label: "Klanten", icon: UserPlus, active: tab === "customers", onClick: () => setTab("customers") },
     { label: "Waarschuwingen", icon: AlertTriangle, active: tab === "warnings", onClick: () => setTab("warnings") },
     { label: "Geblokkeerd", icon: Ban, active: tab === "blocked", onClick: () => setTab("blocked") },
     { label: "Logboek", icon: ScrollText, active: tab === "logs", onClick: () => setTab("logs") },
@@ -128,7 +133,7 @@ export function OwnerDashboard() {
       ) : (
         <>
           {tab === "overview" && stats && (
-            <OwnerOverview stats={stats} warnings={warnings} settings={settings} onTab={setTab} onCreateOrg={() => setShowCreateOrg(true)} />
+            <OwnerOverview stats={stats} warnings={warnings} settings={settings} onTab={setTab} />
           )}
           {tab === "organizations" && (
             <OwnerOrganizationsTab
@@ -155,6 +160,13 @@ export function OwnerDashboard() {
               onBack={() => setTab("overview")}
             />
           )}
+          {tab === "customers" && (
+            <OwnerCustomersTab
+              customers={customers}
+              onRefresh={loadAll}
+              onBack={() => setTab("overview")}
+            />
+          )}
           {tab === "warnings" && <OwnerWarningsTab warnings={warnings} onRefresh={loadAll} onBack={() => setTab("overview")} />}
           {tab === "blocked" && (
             <OwnerBlockedTab blocked={blocked} onRefresh={loadAll} onBack={() => setTab("overview")} />
@@ -167,8 +179,8 @@ export function OwnerDashboard() {
       )}
 
       {/* Modals */}
-            <CreateOrganizationModal open={showCreateOrg} onClose={() => setShowCreateOrg(false)} onCreated={loadAll} />
-<CreateUserModal open={showCreateUser} onClose={() => setShowCreateUser(false)} onCreated={loadAll} />
+      <CreateOrganizationModal open={showCreateOrg} onClose={() => setShowCreateOrg(false)} onCreated={loadAll} />
+      <CreateUserModal open={showCreateUser} onClose={() => setShowCreateUser(false)} onCreated={loadAll} />
       <CreateCustomersModal user={showCreateCustomers} onClose={() => setShowCreateCustomers(null)} onCreated={loadAll} />
       <ManageCustomersModal user={showManageCustomers} users={users} onClose={() => setShowManageCustomers(null)} onUpdated={loadAll} />
       <AccountSettingsModal open={showSettings} onClose={() => setShowSettings(false)} canChangeName={true} />
@@ -179,12 +191,11 @@ export function OwnerDashboard() {
 }
 
 // ===== Overview =====
-function OwnerOverview({ stats, warnings, settings, onTab, onCreateOrg }: {
+function OwnerOverview({ stats, warnings, settings, onTab }: {
   stats: OwnerStats;
   warnings: WarningLog[];
   settings: SettingsData | null;
   onTab: (t: Tab) => void;
-  onCreateOrg?: () => void;
 }) {
   const recentWarnings = warnings.slice(0, 5);
   return (
@@ -192,18 +203,11 @@ function OwnerOverview({ stats, warnings, settings, onTab, onCreateOrg }: {
       <PageHeader
         title="Overzicht"
         subtitle="Platformstatus en statistieken"
-        action={
-          onCreateOrg ? (
-            <button onClick={onCreateOrg} className="btn-secondary">
-              <UserPlus className="h-4 w-4 mr-2" /> Organisatie aanmaken
-            </button>
-          ) : undefined
-        }
       />
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <StatCard label="Organisaties" value={String(stats.organizationCount || 0)} icon={Building2} tone="brand" onClick={() => onTab("organizations")} />
         <StatCard label="Gebruikers" value={String(stats.userCount)} icon={Users} tone="brand" onClick={() => onTab("users")} />
-        <StatCard label="Klanten" value={String(stats.customerCount)} icon={UserPlus} tone="brand" onClick={() => onTab("users")} />
+        <StatCard label="Klanten" value={String(stats.customerCount)} icon={UserPlus} tone="brand" onClick={() => onTab("customers")} />
         <StatCard label="Bestanden" value={String(stats.fileCount)} icon={FileText} tone="neutral" />
         <StatCard label="Totale opslag" value={formatBytes(stats.totalStorageBytes)} icon={HardDrive} tone="neutral" />
         <StatCard label="Geblokkeerd" value={String(stats.blockedCount)} icon={Ban} tone={stats.blockedCount > 0 ? "danger" : "neutral"} onClick={() => onTab("blocked")} />
@@ -276,6 +280,189 @@ function WarningRow({ w }: { w: WarningLog }) {
         </div>
       </div>
       <span className="text-xs text-ink-400 flex-shrink-0">{formatDateTime(w.created_at)}</span>
+    </div>
+  );
+}
+
+interface CustomerItem {
+  id: string;
+  number: string;
+  name: string;
+  status: string;
+  owner_id: string | null;
+  ownerName?: string;
+  ownerNumber?: string;
+  created_at?: string;
+  last_login_at?: string;
+}
+
+// ===== Customers tab =====
+function OwnerCustomersTab({
+  customers,
+  onRefresh,
+  onBack,
+}: {
+  customers: CustomerItem[];
+  onRefresh: () => void;
+  onBack: () => void;
+}) {
+  const { push } = useToast();
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "blocked">("all");
+  const [resetTarget, setResetTarget] = useState<CustomerItem | null>(null);
+  const [unblockTarget, setUnblockTarget] = useState<CustomerItem | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CustomerItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const filtered = customers.filter((c) => {
+    const matchesSearch =
+      c.name.toLowerCase().includes(search.toLowerCase()) ||
+      String(c.number).includes(search) ||
+      (c.ownerName && c.ownerName.toLowerCase().includes(search.toLowerCase()));
+    const matchesStatus =
+      statusFilter === "all" ? true : c.status === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await api.ownerDeleteUser(deleteTarget.id);
+      push("success", `Klant ${deleteTarget.name} is verwijderd.`);
+      setDeleteTarget(null);
+      onRefresh();
+    } catch (err) {
+      push("error", err instanceof Error ? err.message : "Verwijderen mislukt.");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleUnblock = async () => {
+    if (!unblockTarget) return;
+    try {
+      await api.ownerUnblock(unblockTarget.id);
+      push("success", `Klant ${unblockTarget.name} is gedeblokkeerd.`);
+      setUnblockTarget(null);
+      onRefresh();
+    } catch (err) {
+      push("error", err instanceof Error ? err.message : "Deblokkeren mislukt.");
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Klanten"
+        subtitle="Overzicht van alle klantaccounts in het systeem"
+        onBack={onBack}
+      />
+
+      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400" />
+          <input
+            type="text"
+            placeholder="Zoek op klantnaam, nummer of boekhouder..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="input pl-9 w-full text-sm"
+          />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-ink-500 font-medium">Status:</span>
+          <button
+            onClick={() => setStatusFilter("all")}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              statusFilter === "all" ? "bg-ink-200 text-ink-900" : "bg-ink-50 text-ink-600 hover:bg-ink-100"
+            }`}
+          >
+            Alle ({customers.length})
+          </button>
+          <button
+            onClick={() => setStatusFilter("active")}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              statusFilter === "active" ? "bg-emerald-100 text-emerald-800" : "bg-ink-50 text-ink-600 hover:bg-ink-100"
+            }`}
+          >
+            Actief ({customers.filter((c) => c.status === "active").length})
+          </button>
+          <button
+            onClick={() => setStatusFilter("blocked")}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              statusFilter === "blocked" ? "bg-red-100 text-red-800" : "bg-ink-50 text-ink-600 hover:bg-ink-100"
+            }`}
+          >
+            Geblokkeerd ({customers.filter((c) => c.status === "blocked").length})
+          </button>
+        </div>
+      </div>
+
+      <div className="card overflow-hidden">
+        {filtered.length === 0 ? (
+          <EmptyState
+            icon={UserPlus}
+            title="Geen klanten gevonden"
+            subtitle={search ? "Geen klanten voldoen aan de zoekopdracht." : "Er zijn nog geen klanten in het systeem."}
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-ink-100 bg-ink-50/50 text-left text-xs font-medium text-ink-500 uppercase tracking-wide">
+                  <th className="px-5 py-3">Klantnaam</th>
+                  <th className="px-5 py-3">Nummer</th>
+                  <th className="px-5 py-3">Toegewezen Boekhouder / Organisatie</th>
+                  <th className="px-5 py-3">Status</th>
+                  <th className="px-5 py-3">Aangemaakt</th>
+                  <th className="px-5 py-3 text-right">Acties</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-100">
+                {filtered.map((c) => (
+                  <tr key={c.id} className="hover:bg-ink-50/50 transition-colors">
+                    <td className="px-5 py-3 font-medium text-ink-900">
+                      <div className="flex items-center gap-2">
+                        <div className="p-1.5 rounded-md bg-brand-50 text-brand-600">
+                          <User className="h-4 w-4" />
+                        </div>
+                        <span>{c.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3 tabular-nums font-mono text-xs text-ink-600">{c.number}</td>
+                    <td className="px-5 py-3 text-ink-700">{c.ownerName || "Ongekoppeld"}</td>
+                    <td className="px-5 py-3">
+                      {c.status === "active" ? <span className="badge-active">Actief</span> : <span className="badge-blocked">Geblokkeerd</span>}
+                    </td>
+                    <td className="px-5 py-3 text-ink-500">{formatDate(c.created_at ?? null)}</td>
+                    <td className="px-5 py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={() => setResetTarget(c)} className="btn-ghost px-2 py-1 text-xs" title="Wachtwoord resetten">
+                          <Lock className="h-3.5 w-3.5" />
+                        </button>
+                        {c.status === "blocked" && (
+                          <button onClick={() => setUnblockTarget(c)} className="btn-ghost px-2 py-1 text-xs" title="Deblokkeren">
+                            <Unlock className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                        <button onClick={() => setDeleteTarget(c)} className="btn-ghost px-2 py-1 text-xs text-danger-600 hover:text-danger-700" title="Verwijderen">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <ResetPasswordModal user={resetTarget} onClose={() => setResetTarget(null)} />
+      <ConfirmUnblockModal name={unblockTarget?.name ?? null} onCancel={() => setUnblockTarget(null)} onConfirm={handleUnblock} />
+      <ConfirmDeleteModal user={deleteTarget} deleting={deleting} onCancel={() => setDeleteTarget(null)} onConfirm={handleDelete} />
     </div>
   );
 }
@@ -1592,7 +1779,7 @@ function ManageCustomersModal({
   );
 }
 
-function ResetPasswordModal({ user, onClose }: { user: OwnerUser | null; onClose: () => void }) {
+function ResetPasswordModal({ user, onClose }: { user: { id: string; name: string; number: string } | null; onClose: () => void }) {
   const { push } = useToast();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string | null>(null);
@@ -1646,7 +1833,7 @@ function ResetPasswordModal({ user, onClose }: { user: OwnerUser | null; onClose
   );
 }
 
-function ConfirmDeleteModal({ user, deleting, onCancel, onConfirm }: { user: OwnerUser | null; deleting: boolean; onCancel: () => void; onConfirm: () => void }) {
+function ConfirmDeleteModal({ user, deleting, onCancel, onConfirm }: { user: { id: string; name: string; number: string } | null; deleting: boolean; onCancel: () => void; onConfirm: () => void }) {
   return (
     <Modal open={!!user} onClose={onCancel} title="Gebruiker verwijderen" size="sm"
       footer={

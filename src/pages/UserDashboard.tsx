@@ -937,7 +937,7 @@ function ReminderModal({ open, onClose, customers, onRefreshCustomers }: {
         sent: res.sentCount,
         noEmail: res.noEmailCount,
         failed: res.failedCount,
-        error: res.error,
+        error: (res as any).error,
       });
 
       if (res.sentCount > 0) {
@@ -945,7 +945,7 @@ function ReminderModal({ open, onClose, customers, onRefreshCustomers }: {
         if (res.noEmailCount > 0) push("warning", `${res.noEmailCount} klant(en) hebben geen e-mailadres.`);
         if (res.failedCount > 0) push("error", `${res.failedCount} herinnering(en) niet kunnen verzenden.`);
       } else if (res.failedCount > 0) {
-        push("error", res.error || `E-mail verzenden mislukt voor ${res.failedCount} klant(en). Controleer de e-mailinstellingen.`);
+        push("error", (res as any).error || `E-mail verzenden mislukt voor ${res.failedCount} klant(en). Controleer de e-mailinstellingen.`);
       } else if (res.noEmailCount > 0) {
         push("warning", `${res.noEmailCount} geselecteerde klant(en) hebben geen e-mailadres.`);
       }

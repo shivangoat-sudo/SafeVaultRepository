@@ -1,4 +1,4 @@
-export type Role = "owner" | "user" | "customer";
+export type Role = "owner" | "organization" | "user" | "customer";
 
 export type AuthAccount = {
   id: string;

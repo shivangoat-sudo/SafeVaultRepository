@@ -2,21 +2,22 @@ import type { ReactNode } from "react";
 import { X } from "lucide-react";
 
 type ModalProps = {
-  open: boolean;
+  open?: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
-  size?: "sm" | "md" | "lg" | "xl";
+  size?: "sm" | "md" | "lg" | "xl" | "4xl";
   footer?: ReactNode;
 };
 
-export function Modal({ open, onClose, title, children, size = "md", footer }: ModalProps) {
+export function Modal({ open = true, onClose, title, children, size = "md", footer }: ModalProps) {
   if (!open) return null;
   const sizeClass = {
     sm: "max-w-md",
     md: "max-w-lg",
     lg: "max-w-2xl",
     xl: "max-w-4xl",
+    "4xl": "max-w-5xl",
   }[size];
 
   return (

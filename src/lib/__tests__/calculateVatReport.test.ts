@@ -3,26 +3,16 @@ import { calculateVatReport, type RawTransaction } from '../vatEngine';
 console.log("=== STARTING CALCULATE VAT REPORT TEST SUITE ===");
 
 const rawTransactions: RawTransaction[] = [
-  { id: '1', description: 'Verkoop 21%', amount_incl: 121.00, type: 'Inkomsten' },
-  { id: '2', description: 'Verkoop 9%', amount_incl: 109.00, type: 'Inkomsten' },
-  { id: '3', description: 'Inkoop 21%', amount_incl: 121.00, type: 'Uitgaven' },
-  { id: '4', description: 'Inkoop 9%', amount_incl: 109.00, type: 'Uitgaven' },
-  { id: '5', description: 'Horeca BUA', amount_incl: 54.50, type: 'Uitgaven' },
-  { id: '6', description: 'Software EU Verlegd', amount_incl: 100.00, type: 'Uitgaven' },
-  { id: '7', description: 'Vrijgesteld', amount_incl: 50.00, type: 'Uitgaven' },
+  { id: '1', description: 'Verkoop 21%', amount_incl: 121.00, type: 'income' },
+  { id: '2', description: 'Verkoop 9%', amount_incl: 109.00, type: 'income' },
+  { id: '3', description: 'Inkoop 21%', amount_incl: 121.00, type: 'expense' },
+  { id: '4', description: 'Inkoop 9%', amount_incl: 109.00, type: 'expense' },
+  { id: '5', description: 'Horeca BUA', amount_incl: 54.50, type: 'expense' },
+  { id: '6', description: 'Software EU Verlegd', amount_incl: 100.00, type: 'expense' },
+  { id: '7', description: 'Vrijgesteld', amount_incl: 50.00, type: 'expense' },
 ];
 
-const classifications = [
-  { id: '1', category: 'sales_21', applied_rule: 'Rule 21% Sales' },
-  { id: '2', category: 'sales_9', applied_rule: 'Rule 9% Sales' },
-  { id: '3', category: 'expense_21', applied_rule: 'Rule 21% Expense' },
-  { id: '4', category: 'expense_9', applied_rule: 'Rule 9% Expense' },
-  { id: '5', category: 'bua_horeca', applied_rule: 'Rule BUA Horeca' },
-  { id: '6', category: 'reverse_charge', applied_rule: 'Rule Reverse Charge' },
-  { id: '7', category: 'exempt', applied_rule: 'Rule Exempt' },
-];
-
-const rep = calculateVatReport(rawTransactions, classifications);
+const rep = calculateVatReport(rawTransactions);
 
 // 1. totaal_incl_21
 console.assert(rep.totaal_incl_21 === 242.00, `totaal_incl_21 expected 242.00 got ${rep.totaal_incl_21}`);

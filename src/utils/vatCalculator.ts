@@ -750,7 +750,7 @@ export const processCSVForVAT = (
               id: txId,
               description,
               amount_incl: amount,
-              type: isIncome ? 'Inkomsten' : 'Uitgaven',
+              type: isIncome ? 'income' : 'expense',
               memo: rawMededelingen || undefined,
               tegenrekening_iban: rawTegenrekening || undefined,
             });
@@ -798,7 +798,7 @@ export const processCSVForVAT = (
             });
           }
 
-          const vatReport = calculateVatReport(rawTransactions, classificationsArr);
+          const vatReport = calculateVatReport(rawTransactions);
 
           const roundedVatToPay = round2(vatToPay);
           const roundedRubriek5b = round2(rubriek5b_vat);

@@ -270,7 +270,7 @@ export function EmailTemplateEditor({ activeQuarter, activeMonthLabel, onBack, o
             </div>
           </div>
           <p className="text-xs text-ink-400 italic">
-            * De variabelen zoals {{klant_naam}} worden tijdens het verzenden automatisch vervangen door de echte gegevens van de geselecteerde klant(en).
+            * De variabelen zoals {"{{klant_naam}}"} worden tijdens het verzenden automatisch vervangen door de echte gegevens van de geselecteerde klant(en).
           </p>
         </div>
       )}
