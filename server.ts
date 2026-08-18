@@ -210,7 +210,6 @@ async function startServer() {
     if (!reqUser) return false;
     if (reqUser.role === "owner") return true;
 
-    // Try Supabase first
     const { data: fileRecord } = await supabase
       .from("files")
       .select("customer_id")
@@ -221,13 +220,6 @@ async function startServer() {
       return canAccessCustomer(reqUser, fileRecord.customer_id);
     }
 
-    // Try dataStore fallback
-    const storeFiles = dataStore.getFiles ? dataStore.getFiles() : [];
-    const storeFile = storeFiles.find((f: any) => f.id === fileId);
-    if (storeFile) {
-      return canAccessCustomer(reqUser, storeFile.customer_id);
-    }
-
     return false;
   };
 
@@ -235,7 +227,6 @@ async function startServer() {
     if (!reqUser) return false;
     if (reqUser.role === "owner") return true;
 
-    // Check Supabase
     const { data: folder } = await supabase
       .from("archive_folders")
       .select("customer_id")
@@ -246,12 +237,6 @@ async function startServer() {
       return canAccessCustomer(reqUser, folder.customer_id);
     }
 
-    // Check dataStore
-    const storeFolder = dataStore.archiveFolders?.[folderId];
-    if (storeFolder) {
-      return canAccessCustomer(reqUser, storeFolder.customer_id);
-    }
-
     return false;
   };
 
@@ -259,7 +244,6 @@ async function startServer() {
     if (!reqUser) return false;
     if (reqUser.role === "owner") return true;
 
-    // Check Supabase
     const { data: file } = await supabase
       .from("archive_files")
       .select("customer_id")
@@ -270,12 +254,6 @@ async function startServer() {
       return canAccessCustomer(reqUser, file.customer_id);
     }
 
-    // Check dataStore
-    const storeFile = dataStore.getArchiveFile ? dataStore.getArchiveFile(fileId) : null;
-    if (storeFile) {
-      return canAccessCustomer(reqUser, storeFile.customer_id);
-    }
-
     return false;
   };
 
@@ -283,13 +261,6 @@ async function startServer() {
     if (!reqUser) return false;
     if (reqUser.role === "owner") return true;
 
-    // Try finding the note in dataStore
-    const storeNote = dataStore.notes?.[noteId];
-    if (storeNote) {
-      return canAccessCustomer(reqUser, storeNote.customer_id);
-    }
-
-    // Try finding in database
     const { data: note } = await supabase
       .from("notes")
       .select("customer_id")
@@ -307,13 +278,6 @@ async function startServer() {
     if (!reqUser) return false;
     if (reqUser.role === "owner") return true;
 
-    // Check dataStore
-    const storeCalc = dataStore.vatCalculations?.[calcId];
-    if (storeCalc) {
-      return canAccessCustomer(reqUser, storeCalc.customer_id);
-    }
-
-    // Check Supabase
     const { data: dbCalc } = await supabase
       .from("btw_calculations")
       .select("customer_id")
@@ -373,27 +337,26 @@ async function startServer() {
         .single();
 
       if (!error && data) {
-        const storeState = dataStore.get2FA(accountId);
         return {
-          two_factor_enabled: Boolean(data.two_factor_enabled || storeState.two_factor_enabled),
-          totp_secret: (data.totp_secret as string) || storeState.totp_secret,
-          last_2fa_verified_at: (data.last_2fa_verified_at as string) || storeState.last_2fa_verified_at,
+          two_factor_enabled: Boolean(data.two_factor_enabled),
+          totp_secret: (data.totp_secret as string) || null,
+          last_2fa_verified_at: (data.last_2fa_verified_at as string) || null,
         };
       }
     } catch (err) {
       console.warn("Supabase 2FA query notice:", err);
     }
-    return dataStore.get2FA(accountId);
+    return { two_factor_enabled: false, totp_secret: null, last_2fa_verified_at: null };
   }
 
   async function saveAccount2FAState(accountId: string, state: { two_factor_enabled?: boolean; totp_secret?: string | null; last_2fa_verified_at?: string | null }) {
-    dataStore.set2FA(accountId, state);
     try {
-      await supabase.from("accounts").update({
-        two_factor_enabled: state.two_factor_enabled,
-        totp_secret: state.totp_secret,
-        last_2fa_verified_at: state.last_2fa_verified_at,
-      }).eq("id", accountId);
+      const updateData: any = {};
+      if (state.two_factor_enabled !== undefined) updateData.two_factor_enabled = state.two_factor_enabled;
+      if (state.totp_secret !== undefined) updateData.totp_secret = state.totp_secret;
+      if (state.last_2fa_verified_at !== undefined) updateData.last_2fa_verified_at = state.last_2fa_verified_at;
+
+      await supabase.from("accounts").update(updateData).eq("id", accountId);
     } catch (err) {
       console.warn("Supabase 2FA update notice:", err);
     }
@@ -944,44 +907,11 @@ async function startServer() {
 
   function mergeFilesWithStore(supabaseFiles: any[], customerId?: string) {
     const formatted = formatFilesWithMetadata(supabaseFiles || []);
-    const storeFiles = dataStore.getFiles(customerId);
-    const existingIds = new Set(formatted.map((f: any) => f.id));
-
-    for (const sf of storeFiles) {
-      if (!existingIds.has(sf.id)) {
-        formatted.push({
-          id: sf.id,
-          customer_id: sf.customer_id,
-          user_id: sf.user_id,
-          original_name: sf.original_name,
-          mime_type: sf.mime_type,
-          size_bytes: sf.size_bytes,
-          storage_path: sf.storage_path,
-          created_at: sf.created_at,
-          category: sf.category || "proof",
-          quarter: normalizeQuarter(sf.quarter) || sf.quarter || "Q1",
-          year: sf.year || new Date().getFullYear(),
-        });
-        existingIds.add(sf.id);
-      }
-    }
-
     return formatted.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }
 
   function mergeNotificationsWithStore(supabaseNotifs: any[], accountId: string) {
     const list = supabaseNotifs ? [...supabaseNotifs] : [];
-    const storeNotifs = dataStore.getNotifications(accountId);
-    const existingIds = new Set(list.map((n: any) => n.id));
-
-    for (const sn of storeNotifs) {
-      if (!existingIds.has(sn.id)) {
-        list.push(sn);
-        existingIds.add(sn.id);
-      }
-    }
-
-    // Deduplicate by message & account_id to ensure only 1 notification per action
     const deduplicated: any[] = [];
     const seenKeys = new Set<string>();
 
@@ -1013,8 +943,13 @@ async function startServer() {
       return res.status(404).json({ error: "Dossier niet gevonden." });
     }
 
-    const notes = dataStore.getNotes(customerId, user.role === "customer");
-    res.json({ notes });
+    let query = supabase.from("notes").select("*").eq("customer_id", customerId);
+    if (user.role === "customer") {
+      query = query.eq("visible_to_customer", true);
+    }
+    const { data: notes, error } = await query.order("created_at", { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ notes: notes || [] });
   });
 
   app.post("/api/dossier/:customerId/notes", requireAuth, async (req: any, res) => {
@@ -1032,17 +967,19 @@ async function startServer() {
     const { title, body, visible_to_customer, file_path, file_name, file_size, mime_type } = req.body;
     if (!title && !body && !file_path) return res.status(400).json({ error: "Titel, inhoud of bijlage is verplicht." });
 
-    const note = dataStore.createNote(
-      customerId,
-      user.id,
-      title || "",
-      body || "",
-      !!visible_to_customer,
+    const { data: note, error } = await supabase.from("notes").insert({
+      customer_id: customerId,
+      author_id: user.id,
+      title: title || "",
+      body: body || "",
+      visible_to_customer: !!visible_to_customer,
       file_path,
       file_name,
       file_size,
       mime_type
-    );
+    }).select().single();
+
+    if (error) return res.status(500).json({ error: error.message });
     res.json({ note });
   });
 
@@ -1059,17 +996,7 @@ async function startServer() {
     }
 
     const { title, body, visible_to_customer, file_path, file_name, file_size, mime_type } = req.body;
-    const note = dataStore.updateNote(
-      noteId,
-      title,
-      body,
-      !!visible_to_customer,
-      file_path,
-      file_name,
-      file_size,
-      mime_type
-    );
-    await supabase.from("notes").update({
+    const { data: note, error } = await supabase.from("notes").update({
       title,
       body,
       visible_to_customer: !!visible_to_customer,
@@ -1078,12 +1005,10 @@ async function startServer() {
       file_size,
       mime_type,
       updated_at: new Date().toISOString()
-    }).eq("id", noteId).catch(() => {});
+    }).eq("id", noteId).select().single();
 
-    if (!note) {
-      const { data: dbNote } = await supabase.from("notes").select("*").eq("id", noteId).single();
-      if (!dbNote) return res.status(404).json({ error: "Notitie niet gevonden." });
-      return res.json({ ok: true, note: dbNote });
+    if (error || !note) {
+      return res.status(404).json({ error: "Notitie niet gevonden." });
     }
 
     res.json({ ok: true, note });
@@ -1101,8 +1026,9 @@ async function startServer() {
       return res.status(404).json({ error: "Notitie niet gevonden." });
     }
 
-    const ok = dataStore.deleteNote(noteId);
-    res.json({ ok });
+    const { error } = await supabase.from("notes").delete().eq("id", noteId);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ok: true });
   });
 
   // ----- Upload Config -----
@@ -3575,8 +3501,14 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
       return res.status(404).json({ error: "Dossier niet gevonden." });
     }
 
-    const calculations = dataStore.getBtwCalculations(customerId);
-    res.json({ calculations });
+    const { data: calculations, error } = await supabase
+      .from("btw_calculations")
+      .select("*")
+      .eq("customer_id", customerId)
+      .order("calc_date", { ascending: false });
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ calculations: calculations || [] });
   });
   
   app.post("/api/dossier/:customerId/btw", requireAuth, async (req: any, res) => {
@@ -3590,7 +3522,21 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
       return res.status(403).json({ error: "Klanten kunnen geen berekeningen opslaan." });
     }
 
-    const saved = dataStore.saveBtwCalculation(customerId, req.body);
+    const bodyData = req.body;
+    const { data: saved, error } = await supabase.from("btw_calculations").insert({
+      customer_id: customerId,
+      user_id: user.id,
+      quarter: bodyData.quarter || "Q1",
+      year: bodyData.year || new Date().getFullYear(),
+      total_inc_21: bodyData.total_inc_21 || bodyData.totaal_incl_21 || 0,
+      total_exc_21: bodyData.total_exc_21 || bodyData.totaal_excl_21 || 0,
+      total_inc_9: bodyData.total_inc_9 || bodyData.totaal_incl_9 || 0,
+      total_exc_9: bodyData.total_exc_9 || bodyData.totaal_excl_9 || 0,
+      btw_to_reclaim: bodyData.btw_to_reclaim || bodyData.btw_eindsaldo || 0,
+      explanation: bodyData.explanation || JSON.stringify(bodyData)
+    }).select().single();
+
+    if (error) return res.status(500).json({ error: error.message });
     res.json({ ok: true, calculation: saved });
   });
 
@@ -3606,8 +3552,9 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
       return res.status(403).json({ error: "Klanten kunnen geen berekeningen verwijderen." });
     }
 
-    const ok = dataStore.deleteBtwCalculation(calcId);
-    res.json({ ok });
+    const { error } = await supabase.from("btw_calculations").delete().eq("id", calcId);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ok: true });
   };
 
   app.post("/api/dossier/btw/:calcId/delete", requireAuth, deleteBtwHandler);
