@@ -1,0 +1,118 @@
+{
+  "customerProfiles": {
+    "6124963": {
+      "id": "8d922f05-49a3-4af7-8cdd-3ae09d9add8b",
+      "number": "6124963",
+      "name": "Klant 6124963",
+      "role": "customer",
+      "status": "active",
+      "created_at": "2026-08-14T14:23:26.143176+00:00",
+      "email": "shivanneal@gmail.com",
+      "first_name": "Shivan",
+      "last_name": "Roeplal",
+      "address": "Waterhoen 1",
+      "postcode": "2643MH",
+      "updated_at": "2026-08-17T11:27:34.394Z"
+    },
+    "8d922f05-49a3-4af7-8cdd-3ae09d9add8b": {
+      "id": "8d922f05-49a3-4af7-8cdd-3ae09d9add8b",
+      "number": "6124963",
+      "name": "Klant 6124963",
+      "role": "customer",
+      "status": "active",
+      "created_at": "2026-08-14T14:23:26.143176+00:00",
+      "email": "shivanneal@gmail.com",
+      "first_name": "Shivan",
+      "last_name": "Roeplal",
+      "address": "Waterhoen 1",
+      "postcode": "2643MH",
+      "updated_at": "2026-08-17T11:27:34.394Z"
+    }
+  },
+  "dossierStatuses": {
+    "8d922f05-49a3-4af7-8cdd-3ae09d9add8b_2026_Q1": {
+      "id": "8d922f05-49a3-4af7-8cdd-3ae09d9add8b_2026_Q1",
+      "customer_id": "8d922f05-49a3-4af7-8cdd-3ae09d9add8b",
+      "year": 2026,
+      "quarter": "Q1",
+      "status": "done",
+      "updated_at": "2026-08-17T11:16:57.732Z"
+    },
+    "8d922f05-49a3-4af7-8cdd-3ae09d9add8b_2026_Q3": {
+      "id": "8d922f05-49a3-4af7-8cdd-3ae09d9add8b_2026_Q3",
+      "customer_id": "8d922f05-49a3-4af7-8cdd-3ae09d9add8b",
+      "year": 2026,
+      "quarter": "Q3",
+      "status": "in_progress",
+      "updated_at": "2026-08-17T11:21:32.172Z"
+    }
+  },
+  "notes": {},
+  "vatCalculations": {},
+  "uploadedFiles": {},
+  "notifications": {},
+  "templates": {},
+  "communications": {},
+  "archiveFolders": {},
+  "archiveFiles": {},
+  "twoFactorAccounts": {
+    "37df534e-f9e9-4ab0-8bb8-27b44de577a0": {
+      "account_id": "37df534e-f9e9-4ab0-8bb8-27b44de577a0",
+      "two_factor_enabled": true,
+      "totp_secret": "KWUWRE7VVFMYSBT66LROEFRS5O25GEOV",
+      "last_2fa_verified_at": "2026-08-18T11:22:37.010Z"
+    }
+  },
+  "organizationSettings": {
+    "8b6a2f0b-efa3-47e6-b008-b10906b17440": {
+      "id": "8b6a2f0b-efa3-47e6-b008-b10906b17440",
+      "max_customers_per_batch": 500,
+      "max_upload_bytes": 52428800,
+      "session_lifetime_hours": 5,
+      "max_login_attempts": 5,
+      "retention_years": 7
+    }
+  },
+  "transferRequests": {},
+  "changeHistory": {},
+  "tempPlaintextPasswords": {
+    "a517326f-0f6e-4f5c-8209-dab592bd637b": "7UqVheSAXe",
+    "c414033a-4dce-4fbc-a9a1-37b2a13ed459": "diqXLnSVvN",
+    "5e421436-2c76-4464-860e-0eaf3ca216b2": "6LdVBAWEcg",
+    "3d2efb21-e107-40dc-aec0-a4d2ecf6e742": "MbYTvmGEhV",
+    "f1ec5288-4a28-4b4a-939f-a4d3a1ad4a19": "DYHEJT2cMW",
+    "ef22e309-1abb-4ced-97c1-d6cbe5686bb5": "QWNGRe5Bwk",
+    "ede0540f-bbd8-434d-a74a-5cf2d97753e0": "APSjC5yeKa",
+    "4d3d8ce2-f218-4233-9ef2-b98fa7b86091": "QrJrpMyGsC",
+    "eca09954-c8db-4767-99c6-ab0b73eb177e": "jbXHhGHXcc",
+    "51c1ef4f-00f1-4eec-acb5-394e59571c2d": "jF8NQtYpG8",
+    "a48b6666-33c7-4583-8291-0587125705bd": "yAdB2rM6nr",
+    "e23229ba-3a84-46e5-b4ac-9fdc6bd7ac9d": "xkSZHLXup6",
+    "a2399f40-516c-470a-adca-ec4346b4f932": "DBdqcrcAUi",
+    "e2fa7781-3b3f-4f95-890a-1468b5542de4": "CfbHbLqbUK",
+    "b796360a-9a94-47b1-8633-f1081cd2812c": "Pass123!",
+    "a93f3613-58eb-4670-828d-950c2422ce4a": "Pass123!",
+    "52fb559e-365b-43be-9c1d-dc494c4cfd31": "Pass123!",
+    "03f1ac70-808d-417e-89f9-b058f77e3d51": "Pass123!",
+    "c7749726-d3df-4a29-a0d2-95a5cb143033": "Pass123!",
+    "1b2d0af4-1866-45a1-b9da-e940c184612e": "Pass123!",
+    "6f7f4e10-39dc-4995-a4e9-6eefada4546e": "Pass123!",
+    "cf21e67e-f2ae-4c04-a276-c2f3889732da": "Pass123!",
+    "d66d1129-99cc-45a3-a4b6-06c57d666dec": "Pass123!",
+    "618c634b-f22a-4a1e-920f-2f55cd795a36": "Pass123!",
+    "85fc5725-cd16-4d4d-ad12-90f09f6b88ad": "Pass123!",
+    "62c213c2-c21e-4fac-ab27-8380baf13731": "Pass123!",
+    "1deb291f-870e-480b-9f4b-c5a113ddb3e2": "Pass123!",
+    "fcc1943c-d403-46f7-81ac-711f2838bf28": "Pass123!",
+    "9d155981-20d3-4f05-b422-8081b715f84e": "Pass123!",
+    "97683f95-e3d1-4be2-a801-1f6ebf016e8c": "Pass123!",
+    "ada63dc6-811d-4811-9481-19a4999defb0": "Pass123!",
+    "415ce0a7-d402-478d-bdff-1a7ee12128aa": "Pass123!",
+    "4afce90d-4e2e-48ac-9e5b-66cb045eaa86": "Pass123!",
+    "f9bea622-a868-4078-b267-03aaa4c97dc2": "Pass123!",
+    "72089c76-d945-4224-adda-b87e39c373d5": "Pass123!",
+    "1d561aaa-bc9f-47db-a808-40412b474b9b": "Pass123!",
+    "b1a1f613-3b8d-4420-ae07-be680dd59936": "Pass123!",
+    "18eefdb0-bab8-43fc-9009-c0f736ae10c3": "Pass123!"
+  }
+}
