@@ -224,10 +224,10 @@ export const api = {
     request<{ ok: boolean; message: string }>(`/owner/users/${userId}/reset-2fa`, {
       method: "POST",
     }),
-  ownerDeleteUser: (userId: string) =>
+  ownerDeleteUser: (userId: string, password?: string) =>
     request<{ ok: boolean }>("/owner/delete-user", {
       method: "POST",
-      body: JSON.stringify({ userId }),
+      body: JSON.stringify({ userId, password }),
     }),
   ownerUnblock: (accountId: string) =>
     request<{ ok: boolean }>("/owner/unblock", {
@@ -244,7 +244,7 @@ export const api = {
       body: JSON.stringify(settings),
     }),
   ownerCount: () => request<{ count: number }>("/owner/owner-count"),
-  deleteOwnerAccount: (payload?: { newOwnerName?: string; newOwnerNumber?: string; newOwnerPassword?: string }) =>
+  deleteOwnerAccount: (payload?: { password?: string; newOwnerName?: string; newOwnerNumber?: string; newOwnerPassword?: string }) =>
     request<{ ok: boolean; message?: string; requiresNewOwner?: boolean }>("/owner/delete-account", {
       method: "POST",
       body: JSON.stringify(payload || {}),
@@ -454,6 +454,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ids, all }),
     }),
+  customerTransfers: () =>
+    request<{ transfers: Array<{ id: string; sender_name: string; sender_number: string; receiver_name: string; receiver_number: string; created_at: string }> }>("/customer/transfers"),
+  customerTransferAction: (id: string, action: "approve" | "decline") =>
+    request<{ ok: boolean }>(`/customer/transfers/${id}/action`, { method: "POST", body: JSON.stringify({ action }) }),
 
   // ===== Shared =====
   notifications: () =>

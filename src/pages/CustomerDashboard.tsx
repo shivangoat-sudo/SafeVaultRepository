@@ -17,6 +17,7 @@ import {
 type Tab = "upload" | "history" | "archive" | "communications" | "notes" | "profile" | "settings";
 
 export function CustomerDashboard() {
+  const { push } = useToast();
   const [tab, setTab] = useState<Tab>("upload");
   const [files, setFiles] = useState<FileRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,13 +25,20 @@ export function CustomerDashboard() {
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [purgeNotice, setPurgeNotice] = useState(false);
+  const [pendingTransfers, setPendingTransfers] = useState<Array<{ id: string; sender_name: string; receiver_name: string }>>([]);
+  const [transferingAction, setTransferingAction] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [f, n] = await Promise.all([api.customerFiles(), api.notifications()]);
+      const [f, n, tr] = await Promise.all([
+        api.customerFiles(),
+        api.notifications(),
+        api.customerTransfers().catch(() => ({ transfers: [] }))
+      ]);
       setFiles(f.files);
       setNotifications(n.notifications);
+      setPendingTransfers(tr.transfers || []);
       const hasPurge = n.notifications.some((x) => x.kind === "file_purged" && !x.read);
       setPurgeNotice(hasPurge);
       if (hasPurge) {
@@ -45,6 +53,19 @@ export function CustomerDashboard() {
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  const handleTransferAction = async (id: string, action: "approve" | "decline") => {
+    setTransferingAction(id);
+    try {
+      await api.customerTransferAction(id, action);
+      push("success", action === "approve" ? "Overdracht geaccepteerd." : "Overdracht geweigerd.");
+      await loadAll();
+    } catch (err) {
+      push("error", err instanceof Error ? err.message : "Actie mislukt.");
+    } finally {
+      setTransferingAction(null);
+    }
+  };
 
   const nav = [
     { label: "Uploaden", icon: Upload, active: tab === "upload", onClick: () => setTab("upload") },
@@ -68,6 +89,33 @@ export function CustomerDashboard() {
         <div className="flex justify-center py-20"><Spinner className="h-6 w-6 text-ink-400" /></div>
       ) : (
         <>
+          {pendingTransfers.map((tr) => (
+            <div key={tr.id} className="mb-4 rounded-lg border border-brand-200 bg-brand-50 p-4 text-xs text-brand-900 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in">
+              <div>
+                <p className="font-semibold text-sm">Overdrachtsverzoek van uw dossier</p>
+                <p className="mt-0.5 text-brand-800">
+                  Behandelaar <strong>{tr.sender_name}</strong> verzoekt uw dossier over te dragen aan <strong>{tr.receiver_name}</strong>. Gaat u hiermee akkoord?
+                </p>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <button
+                  onClick={() => handleTransferAction(tr.id, "decline")}
+                  disabled={transferingAction === tr.id}
+                  className="btn-secondary text-xs"
+                >
+                  Weigeren
+                </button>
+                <button
+                  onClick={() => handleTransferAction(tr.id, "approve")}
+                  disabled={transferingAction === tr.id}
+                  className="btn-primary text-xs"
+                >
+                  {transferingAction === tr.id ? <Spinner className="h-3.5 w-3.5 mr-1" /> : null}
+                  Accepteren
+                </button>
+              </div>
+            </div>
+          ))}
           {purgeNotice && (
             <div className="mb-4 rounded-lg border border-warning-500/20 bg-warning-50 px-4 py-3 text-sm text-warning-700 animate-fade-in">
               Een of meer van uw bestanden is automatisch verwijderd na de bewaartermijn van 2 jaar.
@@ -112,9 +160,8 @@ function UploadTab({ onUploaded }: { onUploaded: () => void }) {
   const [uploading, setUploading] = useState(false);
   const [totalSize, setTotalSize] = useState(0);
   const [processing, setProcessing] = useState(false);
+  const [maxUploadBytes, setMaxUploadBytes] = useState(52428800);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const MAX_SIZE = 50 * 1024 * 1024;
 
   useEffect(() => {
     api.customerGetBookkeeper()
@@ -131,21 +178,27 @@ function UploadTab({ onUploaded }: { onUploaded: () => void }) {
       .finally(() => {
         setLoadingBookkeeper(false);
       });
+
+    api.orgSettings()
+      .then((res) => {
+        if (res.max_upload_bytes) setMaxUploadBytes(res.max_upload_bytes);
+      })
+      .catch(() => {});
   }, []);
 
   const handleFileSelect = (fileList: FileList | null) => {
     if (!fileList) return;
     const valid: File[] = [];
     for (const f of Array.from(fileList)) {
-      if (f.size > MAX_SIZE) {
-        push("error", `Bestand is groter dan 50 MB: ${f.name}`);
+      if (f.size > maxUploadBytes) {
+        push("error", `Bestand "${f.name}" is groter dan de toegestane limiet van ${Math.round(maxUploadBytes / 1024 / 1024)} MB.`);
         continue;
       }
       valid.push(f);
     }
     const newTotal = [...selectedFiles, ...valid].reduce((s, f) => s + f.size, 0);
-    if (newTotal > MAX_SIZE) {
-      push("error", "Totale uploadgrootte mag maximaal 50 MB bedragen.");
+    if (newTotal > maxUploadBytes) {
+      push("error", `Totale uploadgrootte mag maximaal ${Math.round(maxUploadBytes / 1024 / 1024)} MB bedragen.`);
       return;
     }
     if (valid.length > 0) setSelectedFiles((prev) => [...prev, ...valid]);

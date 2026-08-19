@@ -29,6 +29,7 @@ export function AccountSettingsModal({
   const [showDeleteSection, setShowDeleteSection] = useState(false);
   const [checkingOwnerCount, setCheckingOwnerCount] = useState(false);
   const [isLastOwner, setIsLastOwner] = useState(true);
+  const [deleteCurrentPassword, setDeleteCurrentPassword] = useState("");
   const [transferName, setTransferName] = useState("");
   const [transferNumber, setTransferNumber] = useState("");
   const [transferPassword, setTransferPassword] = useState("");
@@ -95,6 +96,10 @@ export function AccountSettingsModal({
 
   const handleDeleteAccount = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!deleteCurrentPassword) {
+      push("error", "Vul uw huidige wachtwoord in om de verwijdering te bevestigen.");
+      return;
+    }
     if (isLastOwner) {
       if (!transferName.trim() || !transferNumber.trim() || !transferPassword) {
         push("error", "Vul alle gegevens in voor de nieuwe eigenaar.");
@@ -105,22 +110,23 @@ export function AccountSettingsModal({
         return;
       }
       if (transferPassword.length < 8) {
-        push("error", "Wachtwoord moet minimaal 8 tekens lang zijn.");
+        push("error", "Wachtwoord van nieuwe eigenaar moet minimaal 8 tekens lang zijn.");
         return;
       }
     }
 
     setDeleting(true);
     try {
-      const res = await api.deleteOwnerAccount(
-        isLastOwner
+      const res = await api.deleteOwnerAccount({
+        password: deleteCurrentPassword,
+        ...(isLastOwner
           ? {
               newOwnerName: transferName.trim(),
               newOwnerNumber: transferNumber.trim(),
               newOwnerPassword: transferPassword,
             }
-          : undefined
-      );
+          : {})
+      });
 
       if (res.ok) {
         push("success", isLastOwner ? "Nieuwe eigenaar ingesteld en oud account verwijderd." : "Account verwijderd.");
@@ -213,6 +219,13 @@ export function AccountSettingsModal({
               </button>
             ) : (
               <form onSubmit={handleDeleteAccount} className="p-4 rounded-lg bg-danger-50 border border-danger-200 space-y-3">
+                <PasswordField
+                  label="Uw huidige wachtwoord (ter bevestiging)"
+                  value={deleteCurrentPassword}
+                  onChange={setDeleteCurrentPassword}
+                  autoComplete="current-password"
+                  required
+                />
                 {isLastOwner ? (
                   <>
                     <div className="flex items-start gap-2 text-danger-800 text-xs font-medium">

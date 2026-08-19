@@ -326,9 +326,11 @@ function OwnerCustomersTab({
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
+    const pwd = window.prompt("Vul uw wachtwoord in ter bevestiging van de verwijdering:");
+    if (!pwd) return;
     setDeleting(true);
     try {
-      await api.ownerDeleteUser(deleteTarget.id);
+      await api.ownerDeleteUser(deleteTarget.id, pwd);
       push("success", `Klant ${deleteTarget.name} is verwijderd.`);
       setDeleteTarget(null);
       onRefresh();
@@ -505,9 +507,11 @@ function OwnerOrganizationsTab({
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
+    const pwd = window.prompt("Vul uw wachtwoord in ter bevestiging van de verwijdering:");
+    if (!pwd) return;
     setDeleting(true);
     try {
-      await api.ownerDeleteUser(deleteTarget.id);
+      await api.ownerDeleteUser(deleteTarget.id, pwd);
       push("success", `Organisatie ${deleteTarget.name} is verwijderd.`);
       setDeleteTarget(null);
       onRefresh();
@@ -766,9 +770,11 @@ function OwnerUsersTab({
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
+    const pwd = window.prompt("Vul uw wachtwoord in ter bevestiging van de verwijdering:");
+    if (!pwd) return;
     setDeleting(true);
     try {
-      await api.ownerDeleteUser(deleteTarget.id);
+      await api.ownerDeleteUser(deleteTarget.id, pwd);
       push("success", `${deleteTarget.name} is verwijderd.`);
       setDeleteTarget(null);
       onRefresh();
