@@ -137,7 +137,22 @@ async function startServer() {
       return false;
     }
     if (reqUser.role === "organization") {
-      // Access denied
+      const { data: customer } = await supabase
+        .from("accounts")
+        .select("owner_id, number")
+        .eq("id", customerId)
+        .eq("role", "customer")
+        .single();
+      if (!customer) return false;
+      if (customer.owner_id === reqUser.id) return true;
+      if (customer.owner_id) {
+        const { data: bookkeeper } = await supabase
+          .from("accounts")
+          .select("owner_id")
+          .eq("id", customer.owner_id)
+          .single();
+        if (bookkeeper?.owner_id === reqUser.id) return true;
+      }
       supabase.from("access_logs").insert({
         account_id: reqUser.id,
         account_number: reqUser.number,
@@ -146,10 +161,10 @@ async function startServer() {
         metadata: { 
           status: "Nieuw", 
           target_customer_id: customerId, 
-          description: "Organisatie probeerde toegang te krijgen tot individuele dossiergegevens." 
+          description: "Organisatie probeerde toegang te krijgen tot niet-gekoppeld klantendossier." 
         }
       }).then(null, (e) => console.error("Access log insert error:", e));
-      return false; // Organizations do not have access to individual dossier content
+      return false;
     }
     return false;
   };
@@ -327,26 +342,24 @@ async function startServer() {
     }
   });
 
-  // Helper to fetch account 2FA state safely from Supabase / dataStore
+  // Helper to fetch account 2FA state safely from Supabase
   async function getAccount2FAState(accountId: string) {
-    try {
-      const { data, error } = await supabase
-        .from("accounts")
-        .select("two_factor_enabled, totp_secret, last_2fa_verified_at")
-        .eq("id", accountId)
-        .single();
+    const { data, error } = await supabase
+      .from("accounts")
+      .select("two_factor_enabled, totp_secret, last_2fa_verified_at")
+      .eq("id", accountId)
+      .single();
 
-      if (!error && data) {
-        return {
-          two_factor_enabled: Boolean(data.two_factor_enabled),
-          totp_secret: (data.totp_secret as string) || null,
-          last_2fa_verified_at: (data.last_2fa_verified_at as string) || null,
-        };
-      }
-    } catch (err) {
-      console.warn("Supabase 2FA query notice:", err);
+    if (error || !data) {
+      console.error("Supabase 2FA query error:", error);
+      throw new Error(`Fout bij opvragen 2FA-status: ${error?.message || "Account niet gevonden"}`);
     }
-    return { two_factor_enabled: false, totp_secret: null, last_2fa_verified_at: null };
+
+    return {
+      two_factor_enabled: Boolean(data.two_factor_enabled),
+      totp_secret: (data.totp_secret as string) || null,
+      last_2fa_verified_at: (data.last_2fa_verified_at as string) || null,
+    };
   }
 
   async function saveAccount2FAState(accountId: string, state: { two_factor_enabled?: boolean; totp_secret?: string | null; last_2fa_verified_at?: string | null }) {
@@ -514,9 +527,6 @@ async function startServer() {
         const sessionLifetime = await getAccountSessionLifetime(account.id, 5);
         const { token, expiresAt } = await createSession(account.id, sessionLifetime);
 
-        // Erase temporary password as login is complete
-        dataStore.clearTempPassword(account.id);
-
         return res.json({ 
           token, 
           account: sanitizeAccount(account),
@@ -529,7 +539,7 @@ async function startServer() {
 
       if (!twoFaState.two_factor_enabled || !twoFaState.totp_secret) {
         // 2FA setup required
-        const tempToken = create2FASetupChallenge(account.id);
+        const tempToken = await create2FASetupChallenge(account.id);
         return res.json({
           requires_2fa: true,
           requires_2fa_setup: true,
@@ -552,9 +562,6 @@ async function startServer() {
         const sessionLifetime = await getAccountSessionLifetime(account.id, 5);
         const { token, expiresAt } = await createSession(account.id, sessionLifetime);
 
-        // Erase temporary password as login is complete
-        dataStore.clearTempPassword(account.id);
-
         return res.json({ 
           token, 
           account: sanitizeAccount(account),
@@ -563,7 +570,7 @@ async function startServer() {
       }
 
       // Verified 48+ hours ago -> ask for TOTP code
-      const tempToken = create2FAVerifyChallenge(account.id);
+      const tempToken = await create2FAVerifyChallenge(account.id);
       return res.json({
         requires_2fa: true,
         requires_2fa_setup: false,
@@ -582,7 +589,7 @@ async function startServer() {
       const { tempToken } = req.body;
       if (!tempToken) return res.status(400).json({ error: "Ontbrekende sessietoken." });
 
-      const challenge = get2FAChallenge(tempToken);
+      const challenge = await get2FAChallenge(tempToken);
       if (!challenge || challenge.type !== "setup") {
         return res.status(401).json({ error: "Ongeldige of verlopen 2FA-sessie. Log opnieuw in." });
       }
@@ -624,7 +631,7 @@ async function startServer() {
       const { tempToken, code } = req.body;
       if (!tempToken || !code) return res.status(400).json({ error: "Ontbrekende velden." });
 
-      const challenge = get2FAChallenge(tempToken);
+      const challenge = await get2FAChallenge(tempToken);
       if (!challenge || challenge.type !== "setup" || !challenge.tempSecret) {
         return res.status(401).json({ error: "Ongeldige of verlopen 2FA-sessie. Log opnieuw in." });
       }
@@ -668,9 +675,6 @@ async function startServer() {
       const sessionLifetime = await getAccountSessionLifetime(account.id, 5);
       const { token, expiresAt } = await createSession(account.id, sessionLifetime);
 
-      // Erase temporary password as login is complete
-      dataStore.clearTempPassword(account.id);
-
       res.json({
         token,
         account: sanitizeAccount(account),
@@ -688,7 +692,7 @@ async function startServer() {
       const { tempToken, code } = req.body;
       if (!tempToken || !code) return res.status(400).json({ error: "Ontbrekende velden." });
 
-      const challenge = get2FAChallenge(tempToken);
+      const challenge = await get2FAChallenge(tempToken);
       if (!challenge || challenge.type !== "verify") {
         return res.status(401).json({ error: "Ongeldige of verlopen 2FA-sessie. Log opnieuw in." });
       }
@@ -741,9 +745,6 @@ async function startServer() {
       const sessionLifetime = await getAccountSessionLifetime(account.id, 5);
       const { token, expiresAt } = await createSession(account.id, sessionLifetime);
 
-      // Erase temporary password as login is complete
-      dataStore.clearTempPassword(account.id);
-
       res.json({
         token,
         account: sanitizeAccount(account),
@@ -770,15 +771,17 @@ async function startServer() {
       return res.status(400).json({ error: "Naam mag niet leeg zijn." });
     }
     const trimmed = newName.trim();
-    
-    // Check limit (max 2 times per 14 days)
-    const allowed = dataStore.trackNameChange(req.user.id);
-    if (!allowed) {
-      return res.status(400).json({ error: "Je hebt het maximale aantal naamswijzigingen (2 keer per 14 dagen) bereikt." });
-    }
 
     const { error } = await supabase.from("accounts").update({ name: trimmed, updated_at: new Date().toISOString() }).eq("id", req.user.id);
     if (error) return res.status(500).json({ error: error.message });
+
+    await supabase.from("access_logs").insert({
+      account_id: req.user.id,
+      event: "name_changed",
+      ip: req.ip || "127.0.0.1",
+      metadata: { newName: trimmed }
+    });
+
     res.json({ ok: true, name: trimmed });
   });
 
@@ -801,18 +804,15 @@ async function startServer() {
       return res.status(400).json({ error: "Huidig wachtwoord is onjuist." });
     }
 
-    // Check limit (max 2 times per 14 days)
-    const allowed = dataStore.trackPasswordChange(req.user.id);
-    if (!allowed) {
-      return res.status(400).json({ error: "Je hebt het maximale aantal wachtwoordwijzigingen (2 keer per 14 dagen) bereikt." });
-    }
-
     const newHash = await bcrypt.hash(newPassword, 10);
     const { error } = await supabase.from("credentials").update({ password_hash: newHash, updated_at: new Date().toISOString() }).eq("account_id", req.user.id);
     if (error) return res.status(500).json({ error: error.message });
 
-    // Clear temp password if it was recorded
-    dataStore.clearTempPassword(req.user.id);
+    await supabase.from("access_logs").insert({
+      account_id: req.user.id,
+      event: "password_changed",
+      ip: req.ip || "127.0.0.1"
+    });
 
     res.json({ ok: true });
   });
@@ -849,9 +849,9 @@ async function startServer() {
       }
       
       if (orgId) {
-        const settings = dataStore.getOrgSettings(orgId);
-        if (settings && settings.session_lifetime_hours) {
-          return Number(settings.session_lifetime_hours);
+        const { data: setRec } = await supabase.from("settings").select("session_lifetime_hours").eq("id", 1).single();
+        if (setRec && setRec.session_lifetime_hours) {
+          return Number(setRec.session_lifetime_hours);
         }
       }
     } catch (err) {
@@ -1115,8 +1115,8 @@ async function startServer() {
       if (customerAcc && customerAcc.owner_id) {
         const { data: ownerAcc } = await supabase.from("accounts").select("id, number").eq("id", customerAcc.owner_id).single();
         if (ownerAcc && String(ownerAcc.number).startsWith("2")) {
-          const orgSettings = dataStore.getOrgSettings(ownerAcc.id);
-          maxUploadBytes = orgSettings.max_upload_bytes || 52428800;
+          const { data: setRec } = await supabase.from("settings").select("max_upload_bytes").eq("id", 1).single();
+          maxUploadBytes = setRec?.max_upload_bytes || 52428800;
         }
       }
     } catch (e) {
@@ -1193,21 +1193,6 @@ async function startServer() {
         console.error("Supabase insert file error:", dbErr);
       }
 
-      // Always save into dataStore for instant cross-system synchronization
-      dataStore.addFile({
-        id: dbDataId,
-        customer_id: user.id,
-        user_id: user.id,
-        original_name: file.originalname,
-        mime_type: file.mimetype,
-        size_bytes: file.size,
-        storage_path: filePath,
-        category: cat,
-        quarter: qtr,
-        year: yr,
-        created_at: new Date().toISOString()
-      });
-
       uploaded.push({
         id: dbDataId,
         name: file.originalname,
@@ -1220,9 +1205,6 @@ async function startServer() {
     }
 
     if (uploaded.length > 0) {
-      // Set status in local store
-      dataStore.setStatus(user.id, yr, qtr, "in_progress");
-
       try {
         const { data: customerAcc } = await supabase
           .from("accounts")
@@ -1247,7 +1229,6 @@ async function startServer() {
         const custName = customerAcc?.name || user.name || "Klant";
         const notifMsg = `Klant ${custName} heeft ${uploaded.length} bestand(en) geüpload voor ${qtr} ${yr}.`;
         
-        dataStore.addNotification(ownerId, "file_uploaded", notifMsg);
         await supabase.from("notifications").insert([{
           account_id: ownerId,
           kind: "file_uploaded",
@@ -1496,30 +1477,10 @@ async function startServer() {
     }
 
     const [foldersRes, filesRes] = await Promise.all([foldersQuery, filesQuery]);
-
     const sbFolders = foldersRes.data || [];
     const sbFiles = filesRes.data || [];
-    const storeArchive = dataStore.getArchive(customerId, folderId as string | undefined);
 
-    const mergedFolders = [...sbFolders];
-    const folderIds = new Set(sbFolders.map((f: any) => f.id));
-    for (const sf of storeArchive.folders) {
-      if (!folderIds.has(sf.id)) {
-        mergedFolders.push(sf);
-        folderIds.add(sf.id);
-      }
-    }
-
-    const mergedFiles = [...sbFiles];
-    const fileIds = new Set(sbFiles.map((f: any) => f.id));
-    for (const sf of storeArchive.files) {
-      if (!fileIds.has(sf.id)) {
-        mergedFiles.push(sf);
-        fileIds.add(sf.id);
-      }
-    }
-
-    res.json({ folders: mergedFolders, files: mergedFiles });
+    res.json({ folders: sbFolders, files: sbFiles });
   });
 
   app.get("/api/customer/archive", requireAuth, async (req: any, res) => {
@@ -1541,27 +1502,8 @@ async function startServer() {
 
     const sbFolders = foldersRes.data || [];
     const sbFiles = filesRes.data || [];
-    const storeArchive = dataStore.getArchive(user.id, folderId as string | undefined);
 
-    const mergedFolders = [...sbFolders];
-    const folderIds = new Set(sbFolders.map((f: any) => f.id));
-    for (const sf of storeArchive.folders) {
-      if (!folderIds.has(sf.id)) {
-        mergedFolders.push(sf);
-        folderIds.add(sf.id);
-      }
-    }
-
-    const mergedFiles = [...sbFiles];
-    const fileIds = new Set(sbFiles.map((f: any) => f.id));
-    for (const sf of storeArchive.files) {
-      if (!fileIds.has(sf.id)) {
-        mergedFiles.push(sf);
-        fileIds.add(sf.id);
-      }
-    }
-
-    res.json({ folders: mergedFolders, files: mergedFiles });
+    res.json({ folders: sbFolders, files: sbFiles });
   });
 
   app.post("/api/dossier/:customerId/archive/folders", requireAuth, async (req: any, res) => {
@@ -1587,17 +1529,12 @@ async function startServer() {
       }).select().single();
 
       if (error || !data) {
-        console.warn("Supabase archive folder insert error, using dataStore fallback:", error?.message);
-        const storeFolder = dataStore.addArchiveFolder(customerId, userIdVal, name.trim(), parentId);
-        return res.json({ folder: storeFolder });
+        return res.status(500).json({ error: error?.message || "Fout bij aanmaken map." });
       }
 
-      dataStore.addArchiveFolder(customerId, userIdVal, name.trim(), parentId);
       res.json({ folder: data });
     } catch (err: any) {
-      console.warn("Unexpected archive folder creation error, using dataStore fallback:", err?.message);
-      const storeFolder = dataStore.addArchiveFolder(customerId, userIdVal, name.trim(), parentId);
-      res.json({ folder: storeFolder });
+      res.status(500).json({ error: err?.message || "Fout bij aanmaken map." });
     }
   });
 
@@ -1613,7 +1550,6 @@ async function startServer() {
       return res.status(404).json({ error: "Map niet gevonden." });
     }
 
-    dataStore.renameArchiveFolder(folderId, name.trim());
     await supabase.from("archive_folders").update({ name: name.trim() }).eq("id", folderId);
     res.json({ ok: true });
   });
@@ -1636,7 +1572,6 @@ async function startServer() {
             await supabase.storage.from("archive-files").remove([fileRec.storage_path]).catch(() => {});
           }
           await supabase.from("archive_files").delete().eq("id", fileRec.id);
-          dataStore.deleteArchiveFile(fileRec.id);
         }
       }
       const { data: subfolders } = await supabase.from("archive_folders").select("id").eq("parent_id", fId);
@@ -1645,7 +1580,6 @@ async function startServer() {
           await deleteFolderRecursive(sub.id);
         }
       }
-      dataStore.deleteArchiveFolder(fId);
       await supabase.from("archive_folders").delete().eq("id", fId);
     }
 
@@ -1698,40 +1632,12 @@ async function startServer() {
       }).select().single();
 
       if (dbError || !dbData) {
-        const storeFile = dataStore.addArchiveFile({
-          customerId,
-          userId: userIdVal,
-          folderId,
-          name: file.originalname,
-          mimeType: file.mimetype,
-          sizeBytes: file.size,
-          storagePath: filePath
-        });
-        return res.json({ file: storeFile });
+        return res.status(500).json({ error: dbError?.message || "Fout bij opslaan bestand in database." });
       }
-
-      dataStore.addArchiveFile({
-        customerId,
-        userId: userIdVal,
-        folderId,
-        name: file.originalname,
-        mimeType: file.mimetype,
-        sizeBytes: file.size,
-        storagePath: filePath
-      });
 
       res.json({ file: dbData });
     } catch (err: any) {
-      const storeFile = dataStore.addArchiveFile({
-        customerId,
-        userId: userIdVal,
-        folderId,
-        name: file.originalname,
-        mimeType: file.mimetype,
-        sizeBytes: file.size,
-        storagePath: filePath
-      });
-      res.json({ file: storeFile });
+      res.status(500).json({ error: err.message || "Fout bij uploaden van archiefbestand." });
     }
   });
 
@@ -1743,8 +1649,7 @@ async function startServer() {
       return res.status(404).json({ error: "Bestand niet gevonden." });
     }
 
-    const { data: fileRecord } = await supabase.from("archive_files").select("*").eq("id", fileId).single();
-    const record = fileRecord || dataStore.getArchiveFile(fileId);
+    const { data: record } = await supabase.from("archive_files").select("*").eq("id", fileId).single();
 
     if (!record) return res.status(404).json({ error: "Bestand niet gevonden." });
 
@@ -1764,8 +1669,7 @@ async function startServer() {
       return res.status(404).json({ error: "Bestand niet gevonden." });
     }
 
-    const { data: fileRecord } = await supabase.from("archive_files").select("*").eq("id", fileId).single();
-    const record = fileRecord || dataStore.getArchiveFile(fileId);
+    const { data: record } = await supabase.from("archive_files").select("*").eq("id", fileId).single();
 
     if (!record) return res.status(404).json({ error: "Bestand niet gevonden." });
 
@@ -1788,7 +1692,6 @@ async function startServer() {
       return res.status(404).json({ error: "Bestand niet gevonden." });
     }
 
-    dataStore.renameArchiveFile(fileId, name.trim());
     await supabase.from("archive_files").update({ name: name.trim() }).eq("id", fileId);
     res.json({ ok: true });
   });
@@ -1802,12 +1705,11 @@ async function startServer() {
       return res.status(404).json({ error: "Bestand niet gevonden." });
     }
 
-    dataStore.deleteArchiveFile(fileId);
     const { data: fileRecord } = await supabase.from("archive_files").select("storage_path").eq("id", fileId).single();
     if (fileRecord) await supabase.storage.from("archive-files").remove([fileRecord.storage_path]);
     
     await supabase.from("archive_files").delete().eq("id", fileId);
-    res.json({ ok: true });
+    res.json({ ok: true });;
   });
 
   app.get("/api/dossier/archive/:scope/:scopeId/notes", requireAuth, async (req: any, res) => {
@@ -1940,15 +1842,12 @@ async function startServer() {
       .eq("customer_id", customerId)
       .eq("year", y);
 
-    const storeQuarters = dataStore.getStatus(customerId, y);
-
-    // Fetch all files for this customer from both Supabase and dataStore to guarantee 100% accuracy
     const { data: dbFiles } = await supabase
       .from("files")
       .select("*, file_metadata (category, quarter, year)")
       .eq("customer_id", customerId);
 
-    const allFiles = mergeFilesWithStore(dbFiles || [], customerId);
+    const allFiles = dbFiles || [];
     const quartersWithFiles = new Set<string>();
     for (const f of allFiles) {
       const q = normalizeQuarter(f.quarter);
@@ -1960,23 +1859,18 @@ async function startServer() {
 
     const quarters = ["Q1", "Q2", "Q3", "Q4"].map((q) => {
       const dbMatch = dbRows?.find((r) => r.quarter === q);
-      const storeMatch = storeQuarters.find((s) => s.quarter === q);
 
-      // If accountant explicitly set status to "done", keep "done"
-      if (dbMatch?.status === "done" || storeMatch?.status === "done") {
+      if (dbMatch?.status === "done") {
         return {
-          id: dbMatch?.id || storeMatch?.id || `${customerId}_${y}_${q}`,
+          id: dbMatch?.id || `${customerId}_${y}_${q}`,
           quarter: q,
           year: y,
           status: "done",
-          updated_at: dbMatch?.updated_at || storeMatch?.updated_at || new Date().toISOString(),
+          updated_at: dbMatch?.updated_at || new Date().toISOString(),
         };
       }
 
-      // If customer has uploaded files for this quarter, the live status is automatically 'in_progress'!
       if (quartersWithFiles.has(q)) {
-        // Sync to datastore and Supabase if needed
-        dataStore.setStatus(customerId, y, q, "in_progress");
         supabase.from("admin_status").upsert({
           user_id: user.id,
           customer_id: customerId,
@@ -1989,15 +1883,14 @@ async function startServer() {
         });
 
         return {
-          id: dbMatch?.id || storeMatch?.id || `${customerId}_${y}_${q}`,
+          id: dbMatch?.id || `${customerId}_${y}_${q}`,
           quarter: q,
           year: y,
           status: "in_progress",
-          updated_at: dbMatch?.updated_at || storeMatch?.updated_at || new Date().toISOString(),
+          updated_at: dbMatch?.updated_at || new Date().toISOString(),
         };
       }
 
-      // Fallback to explicit status if set (e.g. in_progress set manually without files)
       if (dbMatch && dbMatch.status !== "not_submitted") {
         return {
           id: dbMatch.id,
@@ -2006,10 +1899,6 @@ async function startServer() {
           status: dbMatch.status,
           updated_at: dbMatch.updated_at,
         };
-      }
-
-      if (storeMatch && storeMatch.status !== "not_submitted") {
-        return storeMatch;
       }
 
       return { quarter: q, year: y, status: "not_submitted", updated_at: null };
@@ -2030,8 +1919,6 @@ async function startServer() {
     if (user.role === "customer") return res.status(403).json({ error: "Klanten kunnen statussen niet wijzigen." });
 
     const y = parseInt(year || new Date().getFullYear());
-
-    const updatedStore = dataStore.setStatus(customerId, y, quarter, status);
 
     try {
       await supabase.from("admin_status").upsert(
@@ -2161,7 +2048,6 @@ async function startServer() {
     const { ids, all } = req.body;
     const user = req.user;
 
-    dataStore.markNotificationsRead(user.id, ids);
     try {
       let query = supabase.from("notifications").update({ read: true }).eq("account_id", user.id);
       if (!all && ids && ids.length > 0) {
@@ -2178,7 +2064,6 @@ async function startServer() {
     const { ids, all } = req.body;
     const user = req.user;
 
-    dataStore.markNotificationsRead(user.id, ids);
     try {
       let query = supabase.from("notifications").update({ read: true }).eq("account_id", user.id);
       if (!all && ids && ids.length > 0) {
@@ -2213,7 +2098,7 @@ async function startServer() {
       }
 
       if (!template) {
-        template = dataStore.getTemplate(key);
+        template = { key: "reminder", subject: "Herinnering documenten voor {{kwartaal}}", body: "Beste {{klant_naam}},\n\nHerinnering om je documenten voor {{kwartaal}} aan te leveren.\n\nMet vriendelijke groet,\n{{boekhouder_naam}}" };
       }
 
       res.json({ template });
@@ -2229,17 +2114,15 @@ async function startServer() {
         return res.status(400).json({ error: "Onderwerp en e-mailtekst zijn verplicht." });
       }
 
-      const updated = dataStore.setTemplate(key, subject.trim(), body.trim());
+      const { data: updated, error } = await supabase.from("email_templates").upsert({
+        key,
+        subject: subject.trim(),
+        body: body.trim(),
+        updated_at: new Date().toISOString(),
+      }).select().single();
 
-      try {
-        await supabase.from("email_templates").upsert({
-          key,
-          subject: subject.trim(),
-          body: body.trim(),
-          updated_at: new Date().toISOString(),
-        });
-      } catch {
-        // local dataStore already updated
+      if (error) {
+        return res.status(500).json({ error: "Kon e-mailtemplate niet opslaan." });
       }
 
       res.json({ ok: true, template: updated });
@@ -2261,9 +2144,9 @@ async function startServer() {
       let templateSubject = subject;
       let templateBody = body;
       if (!templateSubject || !templateBody) {
-        const activeTpl = dataStore.getTemplate("reminder");
-        if (!templateSubject) templateSubject = activeTpl.subject;
-        if (!templateBody) templateBody = activeTpl.body;
+        const { data: activeTpl } = await supabase.from("email_templates").select("subject, body").eq("key", "reminder").single();
+        if (!templateSubject) templateSubject = activeTpl?.subject || "Herinnering documenten voor {{kwartaal}}";
+        if (!templateBody) templateBody = activeTpl?.body || "Beste {{klant_naam}},\n\nHerinnering om je documenten voor {{kwartaal}} aan te leveren.";
       }
 
       let dbCustomers: any[] = [];
@@ -2297,33 +2180,9 @@ async function startServer() {
           email: null,
         };
 
-        const profileById = dataStore.getProfile(c.id) || {};
-        const profileByNum = c.number ? dataStore.getProfile(c.number) : {};
-
-        const customerName =
-          profileById.name ||
-          profileByNum.name ||
-          (profileById.first_name && profileById.last_name ? `${profileById.first_name} ${profileById.last_name}` : null) ||
-          (profileByNum.first_name && profileByNum.last_name ? `${profileByNum.first_name} ${profileByNum.last_name}` : null) ||
-          c.name ||
-          `Klant ${cid}`;
-
-        const companyName =
-          profileById.company_name ||
-          profileByNum.company_name ||
-          profileById.bedrijfsnaam ||
-          profileByNum.bedrijfsnaam ||
-          customerName;
-
-        const customerEmail =
-          profileById.email ||
-          profileByNum.email ||
-          c.email ||
-          profileById.emailaddress ||
-          profileByNum.emailaddress ||
-          profileById["E-mailadres"] ||
-          profileByNum["E-mailadres"] ||
-          null;
+        const customerName = c.name || `Klant ${cid}`;
+        const companyName = customerName;
+        const customerEmail = c.email || null;
 
         if (!customerEmail) {
           noEmailCount++;
@@ -2335,14 +2194,6 @@ async function startServer() {
             error: "Klant heeft geen e-mailadres ingesteld.",
           });
           continue;
-        }
-
-        if (!c.email && customerEmail && c.id) {
-          try {
-            await supabase.from("accounts").update({ email: customerEmail }).eq("id", c.id);
-          } catch {
-            // ignore
-          }
         }
 
         const render = (text: string) => {
@@ -2380,26 +2231,14 @@ async function startServer() {
             error: sendResult.error,
           });
 
-          // Log failure record in DB
-          try {
-            await supabase.from("communications").insert({
-              customer_id: c.id,
-              sender_id: user.id,
-              subject: finalSubject,
-              body: `[MISLUKT VERZONDEN] ${sendResult.error}\n\n${finalBody}`,
-              quarter: quarter || null,
-              status: "failed",
-            });
-          } catch {
-            dataStore.addCommunication({
-              customer_id: c.id,
-              sender_id: user.id,
-              subject: finalSubject,
-              body: `[MISLUKT VERZONDEN] ${sendResult.error}\n\n${finalBody}`,
-              quarter: quarter || null,
-              status: "failed",
-            });
-          }
+          await supabase.from("communications").insert({
+            customer_id: c.id,
+            sender_id: user.id,
+            subject: finalSubject,
+            body: `[MISLUKT VERZONDEN] ${sendResult.error}\n\n${finalBody}`,
+            quarter: quarter || null,
+            status: "failed",
+          }).catch(() => {});
           continue;
         }
 
@@ -2412,25 +2251,14 @@ async function startServer() {
           status: "accepted",
         });
 
-        const { error: commError } = await supabase.from("communications").insert({
+        await supabase.from("communications").insert({
           customer_id: c.id,
           sender_id: user.id,
           subject: finalSubject,
           body: finalBody,
           quarter: quarter || null,
           status: "accepted",
-        });
-
-        if (commError) {
-          dataStore.addCommunication({
-            customer_id: c.id,
-            sender_id: user.id,
-            subject: finalSubject,
-            body: finalBody,
-            quarter: quarter || null,
-            status: "accepted",
-          });
-        }
+        }).catch(() => {});
       }
 
       res.json({
@@ -2615,9 +2443,6 @@ async function startServer() {
     const userId = req.params.id;
     if (!userId) return res.status(400).json({ error: "userId is verplicht" });
 
-    // Reset in dataStore
-    dataStore.reset2FA(userId);
-
     // Reset in Supabase
     try {
       await supabase.from("accounts").update({
@@ -2675,7 +2500,6 @@ async function startServer() {
       createdAccountIds.push(orgAccount.id);
       
       await supabase.from("credentials").insert({ account_id: orgAccount.id, password_hash: orgHash });
-      dataStore.setTempPassword(orgAccount.id, org.password);
 
       // 2. Create Users and Customers
       for (const u of users || []) {
@@ -2687,7 +2511,6 @@ async function startServer() {
         createdAccountIds.push(userAcc.id);
         
         await supabase.from("credentials").insert({ account_id: userAcc.id, password_hash: uHash });
-        dataStore.setTempPassword(userAcc.id, u.password);
 
         // 3. Create Customers
         for (const c of u.customers || []) {
@@ -2699,7 +2522,6 @@ async function startServer() {
           createdAccountIds.push(custAcc.id);
           
           await supabase.from("credentials").insert({ account_id: custAcc.id, password_hash: cHash });
-          dataStore.setTempPassword(custAcc.id, c.password);
         }
       }
 
@@ -2752,9 +2574,6 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
 
     await supabase.from("credentials").insert({ account_id: account.id, password_hash: hash });
 
-    // Store temporary plaintext password
-    dataStore.setTempPassword(account.id, password);
-
     await supabase.from("access_logs").insert({
       account_id: account.id,
       account_number: number,
@@ -2784,7 +2603,6 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
       
       if (!accErr && account) {
         await supabase.from("credentials").insert({ account_id: account.id, password_hash: hash });
-        dataStore.setTempPassword(account.id, tempPassword);
         created.push({ number: account.number, name: account.name, tempPassword });
       }
     }
@@ -2806,9 +2624,6 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
     }, { onConflict: "account_id" });
 
     if (error) return res.status(500).json({ error: error.message });
-
-    // Store temporary plaintext password
-    dataStore.setTempPassword(userId, tempPassword);
 
     await supabase.from("access_logs").insert({
       account_id: userId,
@@ -3103,8 +2918,6 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
       .select("customer_id, quarter, status")
       .eq("year", targetYear);
 
-    const storeStatuses = dataStore.getStoreStatuses ? dataStore.getStoreStatuses() : [];
-
     // Map of explicitly set statuses: explicitStatusMap[quarter][customerId] = "done" | "in_progress" | "not_submitted"
     const explicitStatusMap: Record<string, Record<string, string>> = {
       Q1: {}, Q2: {}, Q3: {}, Q4: {}
@@ -3118,27 +2931,12 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
       }
     }
 
-    for (const s of storeStatuses) {
-      if (s.year === targetYear && explicitStatusMap[s.quarter]) {
-        explicitStatusMap[s.quarter][s.customer_id] = s.status;
-      }
-    }
-
     // Determine which customers uploaded files for each quarter
     const filesQuarterSets: Record<string, Set<string>> = {
       Q1: new Set(), Q2: new Set(), Q3: new Set(), Q4: new Set()
     };
 
     try {
-      const storeFiles = dataStore.getFiles();
-      for (const sf of storeFiles) {
-        const custId = sf.customer_id;
-        const normQ = normalizeQuarter(sf.quarter);
-        const yrNum = sf.year ? parseInt(String(sf.year), 10) : targetYear;
-        if (yrNum === targetYear && normQ && filesQuarterSets[normQ] && custId) {
-          filesQuarterSets[normQ].add(custId);
-        }
-      }
 
       let filesQuery = supabase
         .from("files")
@@ -3392,10 +3190,9 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
       return res.status(404).json({ error: "Profiel niet gevonden." });
     }
 
-    const { data: account } = await supabase.from("accounts").select("id, number, name, role, status, created_at").eq("id", customerId).single();
-    const storedProfile = dataStore.getProfile(customerId);
+    const { data: account } = await supabase.from("accounts").select("id, number, name, email, role, status, created_at").eq("id", customerId).single();
 
-    res.json({ profile: { ...(account || {}), ...storedProfile } });
+    res.json({ profile: account || {} });
   });
 
   const saveDossierProfile = async (req: any, res: any) => {
@@ -3410,18 +3207,20 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
     }
 
     const profileData = (req.body && req.body.profile && typeof req.body.profile === "object") ? req.body.profile : req.body;
-    const updated = dataStore.setProfile(customerId, profileData);
-
     const emailVal = profileData.email || profileData.emailaddress || profileData["E-mailadres"] || profileData["email_address"];
-    if (emailVal) {
-      try {
-        await supabase.from("accounts").update({ email: emailVal }).or(`id.eq.${customerId},number.eq.${customerId}`);
-      } catch {
-        // ignore
-      }
+    const nameVal = profileData.name || profileData.first_name ? `${profileData.first_name || ""} ${profileData.last_name || ""}`.trim() : undefined;
+
+    const updates: any = {};
+    if (emailVal) updates.email = emailVal;
+    if (nameVal) updates.name = nameVal;
+
+    if (Object.keys(updates).length > 0) {
+      await supabase.from("accounts").update(updates).eq("id", customerId);
     }
 
-    res.json({ ok: true, profile: updated });
+    const { data: updatedAccount } = await supabase.from("accounts").select("id, number, name, email, role, status, created_at").eq("id", customerId).single();
+
+    res.json({ ok: true, profile: updatedAccount || {} });
   };
 
   app.post("/api/dossier/:customerId/profile", requireAuth, saveDossierProfile);
@@ -3429,32 +3228,29 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
 
   app.get("/api/customer/profile", requireAuth, async (req: any, res) => {
     const user = req.user;
-    const { data: account } = await supabase.from("accounts").select("id, number, name, role, status, created_at").eq("id", user.id).single();
-    const storedProfile = dataStore.getProfile(user.id);
+    const { data: account } = await supabase.from("accounts").select("id, number, name, email, role, status, created_at").eq("id", user.id).single();
 
-    res.json({ profile: { ...(account || {}), ...storedProfile } });
+    res.json({ profile: account || {} });
   });
 
   const saveCustomerProfile = async (req: any, res: any) => {
     const user = req.user;
     const profileData = (req.body && req.body.profile && typeof req.body.profile === "object") ? req.body.profile : req.body;
-    const updated = dataStore.setProfile(user.id, profileData);
-
-    const { data: userAcc } = await supabase.from("accounts").select("number, email").eq("id", user.id).single();
-    if (userAcc?.number) {
-      dataStore.setProfile(userAcc.number, profileData);
-    }
 
     const emailVal = profileData.email || profileData.emailaddress || profileData["E-mailadres"] || profileData["email_address"];
-    if (emailVal) {
-      try {
-        await supabase.from("accounts").update({ email: emailVal }).eq("id", user.id);
-      } catch {
-        // ignore
-      }
+    const nameVal = profileData.name || (profileData.first_name ? `${profileData.first_name || ""} ${profileData.last_name || ""}`.trim() : undefined);
+
+    const updates: any = {};
+    if (emailVal) updates.email = emailVal;
+    if (nameVal) updates.name = nameVal;
+
+    if (Object.keys(updates).length > 0) {
+      await supabase.from("accounts").update(updates).eq("id", user.id);
     }
 
-    res.json({ ok: true, profile: updated });
+    const { data: updatedAccount } = await supabase.from("accounts").select("id, number, name, email, role, status, created_at").eq("id", user.id).single();
+
+    res.json({ ok: true, profile: updatedAccount || {} });
   };
 
   app.post("/api/customer/profile", requireAuth, saveCustomerProfile);
@@ -4057,16 +3853,14 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
     if (req.user.role !== "owner") {
       return res.status(403).json({ error: "Geen toegang: Uitsluitend de eigenaar heeft toegang tot deze instellingen." });
     }
-    const orgId = req.query.orgId || req.user.id;
-    const settings = dataStore.getOrgSettings(orgId);
-    res.json(settings);
+    const { data: setRec } = await supabase.from("settings").select("*").eq("id", 1).single();
+    res.json(setRec || {});
   });
 
   app.post("/api/organization/settings", requireAuth, async (req: any, res) => {
     if (req.user.role !== "owner") {
       return res.status(403).json({ error: "Geen toegang: Uitsluitend de eigenaar heeft toegang tot deze instellingen." });
     }
-    const orgId = req.body.orgId || req.user.id;
     const {
       max_customers_per_batch,
       max_upload_bytes,
@@ -4074,14 +3868,19 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
       max_login_attempts,
       retention_years
     } = req.body;
-    const settings = dataStore.setOrgSettings(orgId, {
-      max_customers_per_batch: Number(max_customers_per_batch),
-      max_upload_bytes: Number(max_upload_bytes),
-      session_lifetime_hours: Number(session_lifetime_hours),
-      max_login_attempts: Number(max_login_attempts),
-      retention_years: Number(retention_years)
-    });
-    res.json(settings);
+
+    const { data: updated, error } = await supabase.from("settings").upsert({
+      id: 1,
+      max_customer_accounts_per_batch: Number(max_customers_per_batch) || 50,
+      max_upload_bytes: Number(max_upload_bytes) || 52428800,
+      session_lifetime_hours: Number(session_lifetime_hours) || 24,
+      max_login_attempts: Number(max_login_attempts) || 5,
+      retention_years: Number(retention_years) || 7,
+      updated_at: new Date().toISOString()
+    }).select().single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(updated);
   });
 
   app.post("/api/user/create-customers", requireAuth, async (req: any, res) => {
@@ -4091,17 +3890,10 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
     const { count } = req.body;
     const targetOwnerId = req.user.id;
     
-    // Check limit
-    let maxAllowed = 50; // default platform
-    if (req.user.role === "organization") {
-      const settings = dataStore.getOrgSettings(req.user.id);
-      maxAllowed = settings.max_customers_per_batch || 500;
-    } else {
-      // Fetch platform settings from supabase settings table
-      const { data: platformSet } = await supabase.from("settings").select("max_customer_accounts_per_batch").single();
-      if (platformSet && platformSet.max_customer_accounts_per_batch) {
-        maxAllowed = platformSet.max_customer_accounts_per_batch;
-      }
+    let maxAllowed = 50;
+    const { data: platformSet } = await supabase.from("settings").select("max_customer_accounts_per_batch").eq("id", 1).single();
+    if (platformSet && platformSet.max_customer_accounts_per_batch) {
+      maxAllowed = platformSet.max_customer_accounts_per_batch;
     }
 
     if (count > maxAllowed) {
@@ -4120,7 +3912,6 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
       
       if (!accErr && account) {
         await supabase.from("credentials").insert({ account_id: account.id, password_hash: hash });
-        dataStore.setTempPassword(account.id, tempPassword);
         created.push({ number: account.number, name: account.name, tempPassword });
       }
     }
@@ -4132,16 +3923,10 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
     if (req.user.role !== "user") {
       return res.status(403).json({ error: "Geen toegang" });
     }
-    const list = dataStore.getTransferRequests();
+    const { data: list } = await supabase.from("transfers").select("*").or(`sender_user_id.eq.${req.user.id},receiver_user_id.eq.${req.user.id}`);
     
-    // Filter transfers where this user is sender OR receiver
-    const filtered = list.filter(
-      (t) => t.sender_user_id === req.user.id || t.receiver_user_id === req.user.id
-    );
-
-    // Let's attach customer & user details for convenience
     const enriched = [];
-    for (const item of filtered) {
+    for (const item of (list || [])) {
       const { data: customer } = await supabase.from("accounts").select("id, name, number").eq("id", item.customer_id).single();
       const { data: sender } = await supabase.from("accounts").select("id, name, number").eq("id", item.sender_user_id).single();
       const { data: receiver } = await supabase.from("accounts").select("id, name, number").eq("id", item.receiver_user_id).single();
@@ -4165,13 +3950,11 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
       return res.status(400).json({ error: "Ontbrekende velden" });
     }
 
-    // Check access to customer
     const hasAccess = await canAccessCustomer(req.user, customerId);
     if (!hasAccess) {
       return res.status(403).json({ error: "U heeft geen toestemming voor deze klant." });
     }
 
-    // Fetch customer and receiver user
     const { data: customer } = await supabase.from("accounts").select("id, owner_id, role").eq("id", customerId).single();
     const { data: targetUser } = await supabase.from("accounts").select("id, status, role, owner_id").eq("id", receiverUserId).single();
 
@@ -4182,7 +3965,6 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
       return res.status(404).json({ error: "Doelgebruiker niet gevonden of niet actief." });
     }
 
-    // Enforce organization isolation
     const senderOrgId = req.user.role === "organization" ? req.user.id : req.user.owner_id;
     const targetOrgId = targetUser.role === "organization" ? targetUser.id : targetUser.owner_id;
 
@@ -4190,8 +3972,14 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
       return res.status(403).json({ error: "Overdracht geweigerd: doelgebruiker behoort niet tot dezelfde organisatie." });
     }
 
-    // Create transfer request
-    const request = dataStore.createTransferRequest(req.user.id, receiverUserId, customerId);
+    const { data: request, error: insErr } = await supabase.from("transfers").insert({
+      sender_user_id: req.user.id,
+      receiver_user_id: receiverUserId,
+      customer_id: customerId,
+      status: "pending_receiver"
+    }).select().single();
+
+    if (insErr) return res.status(500).json({ error: insErr.message });
     res.json({ ok: true, transfer: request });
   });
 
@@ -4202,35 +3990,32 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
     const { id } = req.params;
     const { action } = req.body;
 
-    const request = dataStore.getTransferRequest(id);
+    const { data: request } = await supabase.from("transfers").select("*").eq("id", id).single();
     if (!request) {
       return res.status(404).json({ error: "Overdrachtsverzoek niet gevonden" });
     }
 
     if (action === "cancel") {
-      // Only sender can cancel
       if (request.sender_user_id !== req.user.id) {
         return res.status(403).json({ error: "Alleen de verzender kan dit verzoek annuleren." });
       }
-      dataStore.updateTransferRequestStatus(id, "cancelled");
+      await supabase.from("transfers").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("id", id);
       return res.json({ ok: true });
     }
 
     if (action === "approve") {
-      // Only receiver can approve
       if (request.receiver_user_id !== req.user.id) {
         return res.status(403).json({ error: "Alleen de ontvanger kan dit verzoek goedkeuren." });
       }
-      dataStore.updateTransferRequestStatus(id, "pending_customer");
+      await supabase.from("transfers").update({ status: "pending_customer", updated_at: new Date().toISOString() }).eq("id", id);
       return res.json({ ok: true });
     }
 
     if (action === "decline") {
-      // Only receiver can decline
       if (request.receiver_user_id !== req.user.id) {
         return res.status(403).json({ error: "Alleen de ontvanger kan dit verzoek afwijzen." });
       }
-      dataStore.updateTransferRequestStatus(id, "declined_receiver");
+      await supabase.from("transfers").update({ status: "declined_receiver", updated_at: new Date().toISOString() }).eq("id", id);
       return res.json({ ok: true });
     }
 
@@ -4241,11 +4026,10 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
     if (req.user.role !== "customer") {
       return res.status(403).json({ error: "Geen toegang" });
     }
-    const list = dataStore.getTransferRequests();
-    const filtered = list.filter((t) => t.customer_id === req.user.id && t.status === "pending_customer");
+    const { data: list } = await supabase.from("transfers").select("*").eq("customer_id", req.user.id).eq("status", "pending_customer");
     
     const enriched = [];
-    for (const item of filtered) {
+    for (const item of (list || [])) {
       const { data: sender } = await supabase.from("accounts").select("id, name, number").eq("id", item.sender_user_id).single();
       const { data: receiver } = await supabase.from("accounts").select("id, name, number").eq("id", item.receiver_user_id).single();
       enriched.push({
@@ -4264,18 +4048,17 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
     const { id } = req.params;
     const { action } = req.body;
 
-    const request = dataStore.getTransferRequest(id);
+    const { data: request } = await supabase.from("transfers").select("*").eq("id", id).single();
     if (!request || request.customer_id !== req.user.id || request.status !== "pending_customer") {
       return res.status(404).json({ error: "Geen lopend overdrachtsverzoek gevonden." });
     }
 
     if (action === "decline") {
-      dataStore.updateTransferRequestStatus(id, "declined_customer");
+      await supabase.from("transfers").update({ status: "declined_customer", updated_at: new Date().toISOString() }).eq("id", id);
       return res.json({ ok: true });
     }
 
     if (action === "approve") {
-      // Verify receiver user is active and belongs to same organization
       const { data: receiverUser } = await supabase.from("accounts").select("id, status, role, owner_id").eq("id", request.receiver_user_id).single();
       const { data: senderUser } = await supabase.from("accounts").select("id, role, owner_id").eq("id", request.sender_user_id).single();
 
@@ -4290,7 +4073,6 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
         return res.status(403).json({ error: "Overdracht geweigerd: de ontvanger behoort niet tot de organisatie van deze klant." });
       }
 
-      // Complete the transfer! Update owner_id in supabase
       const { error } = await supabase
         .from("accounts")
         .update({ owner_id: request.receiver_user_id, updated_at: new Date().toISOString() })
@@ -4300,7 +4082,7 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
         return res.status(500).json({ error: "Fout bij bijwerken van de eigenaar: " + error.message });
       }
 
-      dataStore.updateTransferRequestStatus(id, "completed");
+      await supabase.from("transfers").update({ status: "completed", updated_at: new Date().toISOString() }).eq("id", id);
       return res.json({ ok: true });
     }
 

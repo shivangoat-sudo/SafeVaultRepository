@@ -1,8 +1,11 @@
--- Create storage bucket for files
+-- Create storage buckets for files & archives
 INSERT INTO storage.buckets (id, name, public) 
-VALUES ('safevault_files', 'safevault_files', false)
+VALUES 
+    ('customer-files', 'customer-files', false),
+    ('safevault_files', 'safevault_files', false),
+    ('archive-files', 'archive-files', false),
+    ('safevault_archives', 'safevault_archives', false)
 ON CONFLICT (id) DO NOTHING;
 
--- Since the backend uses service_role key to bypass RLS, we don't strictly need to write complex RLS policies for storage objects here. 
--- However, we can add a basic policy just in case the client ever accesses it directly.
+-- Policy for storage objects
 CREATE POLICY "Deny all public access" ON storage.objects FOR ALL USING (false);

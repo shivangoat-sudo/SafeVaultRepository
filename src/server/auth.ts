@@ -2,7 +2,6 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { supabase } from "./lib/supabase.js";
 
-// In-memory store for active 2FA challenges
 export type TwoFactorChallenge = {
   id: string;
   userId: string;
@@ -18,39 +17,79 @@ export function generateToken(length = 32) {
   return crypto.randomBytes(length).toString("hex");
 }
 
-export function create2FASetupChallenge(userId: string): string {
+export async function create2FASetupChallenge(userId: string): Promise<string> {
   const tempToken = generateToken(24);
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+  
   twoFactorChallengeStore.set(tempToken, {
     id: tempToken,
     userId,
     type: "setup",
-    expiresAt: new Date(Date.now() + 15 * 60 * 1000), // 15 mins
+    expiresAt,
     attemptCount: 0,
   });
+
+  await supabase.from("two_factor_challenges").insert({
+    account_id: userId,
+    temp_token: tempToken,
+    temp_secret: "setup",
+    expires_at: expiresAt.toISOString(),
+  }).catch(() => {});
+
   return tempToken;
 }
 
-export function create2FAVerifyChallenge(userId: string): string {
+export async function create2FAVerifyChallenge(userId: string): Promise<string> {
   const tempToken = generateToken(24);
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
   twoFactorChallengeStore.set(tempToken, {
     id: tempToken,
     userId,
     type: "verify",
-    expiresAt: new Date(Date.now() + 15 * 60 * 1000), // 15 mins
+    expiresAt,
     attemptCount: 0,
   });
+
+  await supabase.from("two_factor_challenges").insert({
+    account_id: userId,
+    temp_token: tempToken,
+    temp_secret: "verify",
+    expires_at: expiresAt.toISOString(),
+  }).catch(() => {});
+
   return tempToken;
 }
 
-export function get2FAChallenge(tempToken: string): TwoFactorChallenge | null {
+export async function get2FAChallenge(tempToken: string): Promise<TwoFactorChallenge | null> {
   if (!tempToken) return null;
   const challenge = twoFactorChallengeStore.get(tempToken);
-  if (!challenge) return null;
-  if (challenge.expiresAt < new Date()) {
-    twoFactorChallengeStore.delete(tempToken);
+  if (challenge) {
+    if (challenge.expiresAt < new Date()) {
+      twoFactorChallengeStore.delete(tempToken);
+      return null;
+    }
+    return challenge;
+  }
+
+  // Fallback to Supabase table
+  const { data } = await supabase.from("two_factor_challenges").select("*").eq("temp_token", tempToken).single();
+  if (!data) return null;
+  if (new Date(data.expires_at) < new Date()) {
+    await supabase.from("two_factor_challenges").delete().eq("temp_token", tempToken);
     return null;
   }
-  return challenge;
+
+  const restored: TwoFactorChallenge = {
+    id: data.temp_token,
+    userId: data.account_id,
+    type: data.temp_secret === "setup" ? "setup" : "verify",
+    tempSecret: data.temp_secret !== "setup" && data.temp_secret !== "verify" ? data.temp_secret : undefined,
+    expiresAt: new Date(data.expires_at),
+    attemptCount: 0,
+  };
+  twoFactorChallengeStore.set(tempToken, restored);
+  return restored;
 }
 
 export async function hashPassword(password: string) {
@@ -90,12 +129,10 @@ export async function validateSession(token: string) {
   if (error || !session) return null;
 
   if (new Date(session.expires_at) < new Date()) {
-    // Expired session
     await supabase.from("sessions").delete().eq("id", token);
     return null;
   }
 
-  // Get account
   const { data: account, error: accountError } = await supabase
     .from("accounts")
     .select("id, number, name, role, status, owner_id")
@@ -115,4 +152,3 @@ export async function revokeSession(token: string) {
   if (!token) return;
   await supabase.from("sessions").delete().eq("id", token);
 }
-
