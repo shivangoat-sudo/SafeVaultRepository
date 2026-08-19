@@ -77,47 +77,42 @@ export function OrganizationDashboard() {
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [loadingCustomers, setLoadingCustomers] = useState(true);
   const [loadingAttention, setLoadingAttention] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // Parallel prefetching on first mount
-  useEffect(() => {
-    // 1. Fetch dashboard overview (critical for first paint)
-    api.orgDashboard()
-      .then((res: unknown) => {
-        setOverviewData(res as OrgDashboardData);
+  const loadAllData = useCallback(() => {
+    setLoadingOverview(true);
+    setLoadingUsers(true);
+    setLoadingCustomers(true);
+    setLoadingAttention(true);
+    setFetchError(null);
+
+    Promise.all([
+      api.orgDashboard(),
+      api.orgUsers(),
+      api.orgCustomers(),
+      api.orgSecurityWarnings(),
+    ])
+      .then(([dash, u, c, w]) => {
+        setOverviewData(dash as OrgDashboardData);
+        setUsers(u.users || []);
+        setCustomers(c.customers || []);
+        setWarnings(w.warnings || []);
+      })
+      .catch((err) => {
+        console.error("OrganizationDashboard load error:", err);
+        setFetchError(err instanceof Error ? err.message : "Fout bij het laden van organisatiegegevens.");
+      })
+      .finally(() => {
         setLoadingOverview(false);
-      })
-      .catch(() => {
-        setLoadingOverview(false);
-      });
-
-    // 2. Preload other tabs in parallel in the background
-    api.orgUsers()
-      .then(res => {
-        setUsers(res.users || []);
         setLoadingUsers(false);
-      })
-      .catch(() => {
-        setLoadingUsers(false);
-      });
-
-    api.orgCustomers()
-      .then(res => {
-        setCustomers(res.customers || []);
         setLoadingCustomers(false);
-      })
-      .catch(() => {
-        setLoadingCustomers(false);
-      });
-
-    api.orgSecurityWarnings()
-      .then(res => {
-        setWarnings(res.warnings || []);
-        setLoadingAttention(false);
-      })
-      .catch(() => {
         setLoadingAttention(false);
       });
   }, []);
+
+  useEffect(() => {
+    loadAllData();
+  }, [loadAllData]);
 
   const handleWarningStatusUpdate = useCallback((id: string, newStatus: string) => {
     setWarnings(prev => prev.map(w => w.id === id ? { ...w, status: newStatus as SecurityWarning["status"] } : w));
@@ -142,6 +137,17 @@ export function OrganizationDashboard() {
   return (
     <DashboardShell nav={nav} roleLabel="Organisatie">
       <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-8">
+        {fetchError && (
+          <div className="p-4 rounded-lg bg-danger-50 border border-danger-200 text-danger-800 text-sm flex items-center justify-between gap-4">
+            <div>
+              <p className="font-semibold">Kon organisatiegegevens niet laden van de server</p>
+              <p className="text-xs text-danger-700 mt-0.5">{fetchError}</p>
+            </div>
+            <button onClick={loadAllData} className="btn-secondary text-xs shrink-0">
+              Opnieuw proberen
+            </button>
+          </div>
+        )}
         {tab === "overview" && (
           <OverviewTab 
             setTab={setTab} 

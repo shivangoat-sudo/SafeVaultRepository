@@ -39,19 +39,21 @@ export function OwnerDashboard() {
   const [showSecurityWarning, setShowSecurityWarning] = useState(false);
 
   const [selectedOrgFilter, setSelectedOrgFilter] = useState<string | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
+    setFetchError(null);
     try {
       const [s, u, custRes, w, b, l, st, n] = await Promise.all([
-        api.ownerStats().catch(() => null),
-        api.ownerUsers().catch(() => ({ users: [] })),
-        api.ownerCustomers().catch(() => ({ customers: [] })),
-        api.ownerWarnings().catch(() => ({ warnings: [] })),
-        api.ownerBlocked().catch(() => ({ blocked: [] })),
-        api.ownerLogs().catch(() => ({ logs: [] })),
-        api.ownerGetSettings().catch(() => null),
-        api.notifications().catch(() => ({ notifications: [], securityWarning: null })),
+        api.ownerStats(),
+        api.ownerUsers(),
+        api.ownerCustomers(),
+        api.ownerWarnings(),
+        api.ownerBlocked(),
+        api.ownerLogs(),
+        api.ownerGetSettings(),
+        api.notifications(),
       ]);
 
       const usersList = u?.users || [];
@@ -76,15 +78,7 @@ export function OwnerDashboard() {
       setWarnings(warningsList);
       setBlocked(blockedList);
       setLogs(logsList);
-
-      setSettings(st || {
-        id: 1,
-        max_customer_accounts_per_batch: 50,
-        max_upload_bytes: 52428800,
-        session_lifetime_hours: 5,
-        max_login_attempts: 5,
-        retention_years: 7
-      });
+      setSettings(st);
 
       setNotifications(notifsList);
       setSecurityWarning(n?.securityWarning || null);
@@ -95,6 +89,7 @@ export function OwnerDashboard() {
       }
     } catch (err) {
       console.error("OwnerDashboard loadAll error:", err);
+      setFetchError(err instanceof Error ? err.message : "Fout bij laden van gegevens.");
     } finally {
       setLoading(false);
     }
@@ -128,6 +123,17 @@ export function OwnerDashboard() {
         </>
       }
     >
+      {fetchError && (
+        <div className="mb-4 p-4 rounded-lg bg-danger-50 border border-danger-200 text-danger-800 text-sm flex items-center justify-between gap-4">
+          <div>
+            <p className="font-semibold">Kon gegevens niet laden van de server</p>
+            <p className="text-xs text-danger-700 mt-0.5">{fetchError}</p>
+          </div>
+          <button onClick={loadAll} className="btn-secondary text-xs shrink-0">
+            Opnieuw proberen
+          </button>
+        </div>
+      )}
       {loading && !stats ? (
         <div className="flex justify-center py-20"><Spinner className="h-6 w-6 text-ink-400" /></div>
       ) : (
@@ -238,10 +244,10 @@ function OwnerOverview({ stats, warnings, settings, onTab }: {
           <div className="space-y-3">
             <StatusRow label="Systeem" value="Operationeel" ok />
             <StatusRow label="Beveiliging" value="Actief" ok />
-            <StatusRow label="Bewaartermijn" value={`${settings?.retention_years ?? 2} jaar`} />
-            <StatusRow label="Max. upload" value={formatBytes(settings?.max_upload_bytes ?? 52428800)} />
-            <StatusRow label="Sessie-duur" value={`${settings?.session_lifetime_hours ?? 12} uur`} />
-            <StatusRow label="Max. loginpogingen" value={String(settings?.max_login_attempts ?? 5)} />
+            <StatusRow label="Bewaartermijn" value={settings ? `${settings.retention_years} jaar` : "Laden..."} />
+            <StatusRow label="Max. upload" value={settings ? formatBytes(settings.max_upload_bytes) : "Laden..."} />
+            <StatusRow label="Sessie-duur" value={settings ? `${settings.session_lifetime_hours} uur` : "Laden..."} />
+            <StatusRow label="Max. loginpogingen" value={settings ? String(settings.max_login_attempts) : "Laden..."} />
           </div>
         </div>
       </div>

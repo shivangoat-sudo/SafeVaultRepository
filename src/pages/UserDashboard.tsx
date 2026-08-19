@@ -36,9 +36,11 @@ export function UserDashboard() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [, setSecurityWarning] = useState<SecurityWarning>(null);
   const [purgeNotice, setPurgeNotice] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
+    setFetchError(null);
     try {
       const [s, n] = await Promise.all([api.userStats(), api.notifications()]);
       setStats(s);
@@ -51,14 +53,16 @@ export function UserDashboard() {
         const purgeIds = n.notifications.filter((x) => x.kind === "file_purged" && !x.read).map((x) => x.id);
         await api.markRead(purgeIds);
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error("UserDashboard loadAll error:", err);
+      setFetchError(err instanceof Error ? err.message : "Fout bij het laden van dashboardgegevens.");
     } finally {
       setLoading(false);
     }
   }, []);
 
   const loadCustomers = useCallback(async () => {
+    setFetchError(null);
     try {
       const params = new URLSearchParams();
       if (filters.search) params.set("search", filters.search);
@@ -67,17 +71,20 @@ export function UserDashboard() {
       if (filters.status && filters.status !== "all") params.set("status", filters.status);
       const res = await api.userCustomers(params.toString());
       setCustomers(res.customers);
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error("UserDashboard loadCustomers error:", err);
+      setFetchError(err instanceof Error ? err.message : "Fout bij het laden van klantenlijst.");
     }
   }, [filters]);
 
   const loadFiles = useCallback(async () => {
+    setFetchError(null);
     try {
       const res = await api.userFiles();
       setFiles(res.files);
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error("UserDashboard loadFiles error:", err);
+      setFetchError(err instanceof Error ? err.message : "Fout bij het laden van bestanden.");
     }
   }, []);
 
@@ -109,13 +116,24 @@ export function UserDashboard() {
         </>
       }
     >
+      {fetchError && (
+        <div className="mb-4 p-4 rounded-lg bg-danger-50 border border-danger-200 text-danger-800 text-sm flex items-center justify-between gap-4">
+          <div>
+            <p className="font-semibold">Kon gegevens niet laden van de server</p>
+            <p className="text-xs text-danger-700 mt-0.5">{fetchError}</p>
+          </div>
+          <button onClick={loadAll} className="btn-secondary text-xs shrink-0">
+            Opnieuw proberen
+          </button>
+        </div>
+      )}
       {loading && !stats ? (
         <div className="flex justify-center py-20"><Spinner className="h-6 w-6 text-ink-400" /></div>
       ) : (
         <>
           {purgeNotice && (
             <div className="mb-4 rounded-lg border border-warning-500/20 bg-warning-50 px-4 py-3 text-sm text-warning-700 animate-fade-in">
-              Een of meer bestanden zijn automatisch verwijderd na de bewaartermijn van 2 jaar.
+              Een of meer bestanden zijn automatisch verwijderd na het verstrijken van de ingestelde bewaartermijn.
             </div>
           )}
           {tab === "overview" && stats && (
@@ -775,7 +793,11 @@ function QuarterMissingModal({ target, onClose, onOpenDossier }: {
   }, [target?.status, target?.quarter]);
 
   useEffect(() => {
-    if (!target) return;
+    if (!target) {
+      setData(null);
+      return;
+    }
+    setData(null);
     setLoading(true);
     api.userQuarterMissing(target.quarter, undefined, activeStatus)
       .then((res) => setData({
@@ -1155,7 +1177,7 @@ function PurgeNoticeModal({ open, onClose }: { open: boolean; onClose: () => voi
         <span className="flex h-10 w-10 items-center justify-center rounded-full bg-warning-50 text-warning-600 flex-shrink-0">
           <ShieldCheck className="h-5 w-5" />
         </span>
-        <p className="text-sm text-ink-600">Een of meer bestanden zijn automatisch verwijderd na de bewaartermijn van 2 jaar, conform het privacybeleid.</p>
+        <p className="text-sm text-ink-600">Een of meer bestanden zijn automatisch verwijderd na het verstrijken van de ingestelde bewaartermijn, conform het privacybeleid.</p>
       </div>
     </Modal>
   );

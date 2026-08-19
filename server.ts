@@ -1100,16 +1100,13 @@ async function startServer() {
       return res.status(400).json({ error: "Geen bestanden meegeleverd." });
     }
 
-    // Determine upload size limits and retention years from settings table
-    let maxUploadBytes = 52428800; // default 50MB
-    let retentionYears = 7;
-    try {
-      const { data: setRec } = await supabase.from("settings").select("max_upload_bytes, retention_years").eq("id", 1).single();
-      if (setRec?.max_upload_bytes) maxUploadBytes = setRec.max_upload_bytes;
-      if (setRec?.retention_years) retentionYears = setRec.retention_years;
-    } catch (e) {
-      console.error("Error fetching settings for file upload:", e);
+    // Determine upload size limits and retention years strictly from settings table in database
+    const { data: setRec, error: setErr } = await supabase.from("settings").select("max_upload_bytes, retention_years").eq("id", 1).single();
+    if (setErr || !setRec) {
+      return res.status(500).json({ error: "Fout bij ophalen van platforminstellingen uit de database." });
     }
+    const maxUploadBytes = setRec.max_upload_bytes;
+    const retentionYears = setRec.retention_years;
 
     // Check sizes of files
     for (const file of files) {
@@ -2746,25 +2743,16 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
     const { data: set, error } = await supabase.from("settings").select("*").single();
 
     if (error || !set) {
-      const defaultSettings = {
-        id: 1,
-        max_customer_accounts_per_batch: 50,
-        max_upload_bytes: 52428800,
-        session_lifetime_hours: 5,
-        max_login_attempts: 5,
-        retention_years: 7
-      };
-      await supabase.from("settings").insert(defaultSettings);
-      return res.json(defaultSettings);
+      return res.status(500).json({ error: "Kon platforminstellingen niet laden uit de database." });
     }
 
     res.json({
       id: set.id,
-      max_customer_accounts_per_batch: set.max_customer_accounts_per_batch ?? 50,
-      max_upload_bytes: set.max_upload_bytes ?? 52428800,
-      session_lifetime_hours: set.session_lifetime_hours ?? 5,
-      max_login_attempts: set.max_login_attempts ?? 5,
-      retention_years: set.retention_years ?? 7
+      max_customer_accounts_per_batch: set.max_customer_accounts_per_batch,
+      max_upload_bytes: set.max_upload_bytes,
+      session_lifetime_hours: set.session_lifetime_hours,
+      max_login_attempts: set.max_login_attempts,
+      retention_years: set.retention_years
     });
   });
 
@@ -2778,13 +2766,29 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
       retention_years
     } = req.body;
 
+    const parsedBatch = Number(max_customer_accounts_per_batch);
+    const parsedBytes = Number(max_upload_bytes);
+    const parsedSession = Number(session_lifetime_hours);
+    const parsedAttempts = Number(max_login_attempts);
+    const parsedRetention = Number(retention_years);
+
+    if (
+      isNaN(parsedBatch) || parsedBatch <= 0 ||
+      isNaN(parsedBytes) || parsedBytes <= 0 ||
+      isNaN(parsedSession) || parsedSession <= 0 ||
+      isNaN(parsedAttempts) || parsedAttempts <= 0 ||
+      isNaN(parsedRetention) || parsedRetention <= 0
+    ) {
+      return res.status(400).json({ error: "Alle instellingen moeten een geldig positief getal zijn." });
+    }
+
     const payload = {
       id: 1,
-      max_customer_accounts_per_batch: Number(max_customer_accounts_per_batch) || 50,
-      max_upload_bytes: Number(max_upload_bytes) || 52428800,
-      session_lifetime_hours: Number(session_lifetime_hours) || 5,
-      max_login_attempts: Number(max_login_attempts) || 5,
-      retention_years: Number(retention_years) || 7,
+      max_customer_accounts_per_batch: parsedBatch,
+      max_upload_bytes: parsedBytes,
+      session_lifetime_hours: parsedSession,
+      max_login_attempts: parsedAttempts,
+      retention_years: parsedRetention,
       updated_at: new Date().toISOString()
     };
 
@@ -3874,16 +3878,16 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
   });
 
   app.get("/api/organization/settings", requireAuth, async (req: any, res) => {
-    if (req.user.role !== "owner") {
-      return res.status(403).json({ error: "Geen toegang: Uitsluitend de eigenaar heeft toegang tot deze instellingen." });
+    const { data: setRec, error } = await supabase.from("settings").select("*").eq("id", 1).single();
+    if (error || !setRec) {
+      return res.status(500).json({ error: "Fout bij ophalen van platforminstellingen." });
     }
-    const { data: setRec } = await supabase.from("settings").select("*").eq("id", 1).single();
-    res.json(setRec || {});
+    res.json(setRec);
   });
 
   app.post("/api/organization/settings", requireAuth, async (req: any, res) => {
     if (req.user.role !== "owner") {
-      return res.status(403).json({ error: "Geen toegang: Uitsluitend de eigenaar heeft toegang tot deze instellingen." });
+      return res.status(403).json({ error: "Geen toegang: Uitsluitend de eigenaar kan instellingen wijzigen." });
     }
     const {
       max_customers_per_batch,
@@ -3893,13 +3897,29 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
       retention_years
     } = req.body;
 
+    const parsedBatch = Number(max_customers_per_batch);
+    const parsedBytes = Number(max_upload_bytes);
+    const parsedSession = Number(session_lifetime_hours);
+    const parsedAttempts = Number(max_login_attempts);
+    const parsedRetention = Number(retention_years);
+
+    if (
+      isNaN(parsedBatch) || parsedBatch <= 0 ||
+      isNaN(parsedBytes) || parsedBytes <= 0 ||
+      isNaN(parsedSession) || parsedSession <= 0 ||
+      isNaN(parsedAttempts) || parsedAttempts <= 0 ||
+      isNaN(parsedRetention) || parsedRetention <= 0
+    ) {
+      return res.status(400).json({ error: "Alle instellingen moeten een geldig positief getal zijn." });
+    }
+
     const { data: updated, error } = await supabase.from("settings").upsert({
       id: 1,
-      max_customer_accounts_per_batch: Number(max_customers_per_batch) || 50,
-      max_upload_bytes: Number(max_upload_bytes) || 52428800,
-      session_lifetime_hours: Number(session_lifetime_hours) || 24,
-      max_login_attempts: Number(max_login_attempts) || 5,
-      retention_years: Number(retention_years) || 7,
+      max_customer_accounts_per_batch: parsedBatch,
+      max_upload_bytes: parsedBytes,
+      session_lifetime_hours: parsedSession,
+      max_login_attempts: parsedAttempts,
+      retention_years: parsedRetention,
       updated_at: new Date().toISOString()
     }).select().single();
 
@@ -3914,11 +3934,11 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
     const { count } = req.body;
     const targetOwnerId = req.user.id;
     
-    let maxAllowed = 50;
-    const { data: platformSet } = await supabase.from("settings").select("max_customer_accounts_per_batch").eq("id", 1).single();
-    if (platformSet && platformSet.max_customer_accounts_per_batch) {
-      maxAllowed = platformSet.max_customer_accounts_per_batch;
+    const { data: platformSet, error: setErr } = await supabase.from("settings").select("max_customer_accounts_per_batch").eq("id", 1).single();
+    if (setErr || !platformSet || !platformSet.max_customer_accounts_per_batch) {
+      return res.status(500).json({ error: "Fout bij ophalen van platforminstellingen." });
     }
+    const maxAllowed = platformSet.max_customer_accounts_per_batch;
 
     if (count > maxAllowed) {
       return res.status(400).json({ error: `U mag maximaal ${maxAllowed} klanten per keer aanmaken.` });

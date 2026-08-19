@@ -27,14 +27,16 @@ export function CustomerDashboard() {
   const [purgeNotice, setPurgeNotice] = useState(false);
   const [pendingTransfers, setPendingTransfers] = useState<Array<{ id: string; sender_name: string; receiver_name: string }>>([]);
   const [transferingAction, setTransferingAction] = useState<string | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
+    setFetchError(null);
     try {
       const [f, n, tr] = await Promise.all([
         api.customerFiles(),
         api.notifications(),
-        api.customerTransfers().catch(() => ({ transfers: [] }))
+        api.customerTransfers()
       ]);
       setFiles(f.files);
       setNotifications(n.notifications);
@@ -45,8 +47,9 @@ export function CustomerDashboard() {
         const purgeIds = n.notifications.filter((x) => x.kind === "file_purged" && !x.read).map((x) => x.id);
         await api.markRead(purgeIds);
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error("CustomerDashboard loadAll error:", err);
+      setFetchError(err instanceof Error ? err.message : "Fout bij het laden van klantgegevens.");
     } finally {
       setLoading(false);
     }
@@ -85,6 +88,17 @@ export function CustomerDashboard() {
       roleLabel="Klant"
       notifications={<NotificationBell count={unreadCount} onClick={() => setNotifOpen(true)} />}
     >
+      {fetchError && (
+        <div className="mb-4 p-4 rounded-lg bg-danger-50 border border-danger-200 text-danger-800 text-sm flex items-center justify-between gap-4">
+          <div>
+            <p className="font-semibold">Kon gegevens niet laden van de server</p>
+            <p className="text-xs text-danger-700 mt-0.5">{fetchError}</p>
+          </div>
+          <button onClick={loadAll} className="btn-secondary text-xs shrink-0">
+            Opnieuw proberen
+          </button>
+        </div>
+      )}
       {loading ? (
         <div className="flex justify-center py-20"><Spinner className="h-6 w-6 text-ink-400" /></div>
       ) : (
@@ -118,7 +132,7 @@ export function CustomerDashboard() {
           ))}
           {purgeNotice && (
             <div className="mb-4 rounded-lg border border-warning-500/20 bg-warning-50 px-4 py-3 text-sm text-warning-700 animate-fade-in">
-              Een of meer van uw bestanden is automatisch verwijderd na de bewaartermijn van 2 jaar.
+              Een of meer van uw bestanden is automatisch verwijderd na het verstrijken van de ingestelde bewaartermijn.
             </div>
           )}
           {tab === "upload" && <UploadTab onUploaded={loadAll} />}
@@ -160,7 +174,8 @@ function UploadTab({ onUploaded }: { onUploaded: () => void }) {
   const [uploading, setUploading] = useState(false);
   const [totalSize, setTotalSize] = useState(0);
   const [processing, setProcessing] = useState(false);
-  const [maxUploadBytes, setMaxUploadBytes] = useState(52428800);
+  const [maxUploadBytes, setMaxUploadBytes] = useState<number | null>(null);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -181,13 +196,23 @@ function UploadTab({ onUploaded }: { onUploaded: () => void }) {
 
     api.orgSettings()
       .then((res) => {
-        if (res.max_upload_bytes) setMaxUploadBytes(res.max_upload_bytes);
+        if (res && res.max_upload_bytes) {
+          setMaxUploadBytes(res.max_upload_bytes);
+        } else {
+          setSettingsError("Maximale uploadlimiet kon niet geladen worden uit de database.");
+        }
       })
-      .catch(() => {});
+      .catch((err) => {
+        setSettingsError(err instanceof Error ? err.message : "Fout bij ophalen van uploadlimiet uit de database.");
+      });
   }, []);
 
   const handleFileSelect = (fileList: FileList | null) => {
     if (!fileList) return;
+    if (!maxUploadBytes) {
+      push("error", "Upload geblokkeerd: Maximale uploadlimiet kan niet worden geverifieerd via de database.");
+      return;
+    }
     const valid: File[] = [];
     for (const f of Array.from(fileList)) {
       if (f.size > maxUploadBytes) {
@@ -268,6 +293,15 @@ function UploadTab({ onUploaded }: { onUploaded: () => void }) {
   return (
     <div className="space-y-6">
       <PageHeader title="Bestanden uploaden" subtitle="Stuur documenten veilig naar uw boekhouder" />
+
+      {settingsError && (
+        <div className="p-4 rounded-lg bg-danger-50 border border-danger-200 text-danger-800 text-sm flex items-center justify-between gap-4">
+          <div>
+            <p className="font-semibold">Uploads momenteel geblokkeerd</p>
+            <p className="text-xs text-danger-700 mt-0.5">{settingsError}</p>
+          </div>
+        </div>
+      )}
 
       <form onSubmit={handleUpload} className="space-y-6">
         {/* Recipient info */}
@@ -459,7 +493,7 @@ function HistoryTab({ files, onRefresh }: { files: FileRow[]; onRefresh: () => v
       </div>
       <p className="text-xs text-ink-400 flex items-center gap-1.5">
         <AlertCircle className="h-3.5 w-3.5" />
-        Bestanden kunnen niet worden verwijderd en worden automatisch na 2 jaar opgeruimd.
+        Bestanden worden automatisch opgeruimd na het verstrijken van de ingestelde bewaartermijn.
       </p>
     </div>
   );
@@ -506,7 +540,7 @@ function PurgeNoticeModal({ open, onClose }: { open: boolean; onClose: () => voi
         <span className="flex h-10 w-10 items-center justify-center rounded-full bg-warning-50 text-warning-600 flex-shrink-0">
           <CheckCircle2 className="h-5 w-5" />
         </span>
-        <p className="text-sm text-ink-600">Een of meer van uw bestanden is automatisch verwijderd na de bewaartermijn van 2 jaar, conform het privacybeleid.</p>
+        <p className="text-sm text-ink-600">Een of meer van uw bestanden is automatisch verwijderd na het verstrijken van de ingestelde bewaartermijn, conform het privacybeleid.</p>
       </div>
     </Modal>
   );
