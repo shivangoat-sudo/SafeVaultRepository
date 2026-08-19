@@ -396,10 +396,11 @@ async function startServer() {
       const cleanPassword = String(password);
 
       // Lookup account by number
-      let { data: accounts, error: accError } = await supabase
+      const { data: initialAccounts, error: accError } = await supabase
         .from("accounts")
         .select("id, number, name, role, status, failed_attempts")
         .eq("number", cleanNumber);
+      let accounts = initialAccounts;
 
       if (accError || !accounts || accounts.length === 0) {
         // Fallback 1: Lookup by email if the number looks like an email address
