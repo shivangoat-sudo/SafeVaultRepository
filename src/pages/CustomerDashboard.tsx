@@ -185,17 +185,22 @@ function UploadTab({ onUploaded }: { onUploaded: () => void }) {
       }
       const res = await api.customerUpload(form);
       push("success", `${res.count} bestand(en) succesvol geüpload.`);
-      setProcessing(true);
-      try {
-        const result = await processFiles(selectedFiles);
-        if (result.metrics.totalRowsProcessed > 0) {
-          push("success", `${result.metrics.totalRowsProcessed} regels verwerkt door BTW-engine.`);
+
+      // Only run VAT engine for income_overview category, NOT for proof (bonnen/facturen)
+      if (category === "income_overview") {
+        setProcessing(true);
+        try {
+          const result = await processFiles(selectedFiles);
+          if (result.metrics.totalRowsProcessed > 0) {
+            push("success", `${result.metrics.totalRowsProcessed} regels verwerkt door BTW-engine.`);
+          }
+        } catch {
+          push("error", "BTW-berekening kon niet worden uitgevoerd. De bestanden zijn wel geüpload.");
+        } finally {
+          setProcessing(false);
         }
-      } catch {
-        push("error", "BTW-berekening kon niet worden uitgevoerd. De bestanden zijn wel geüpload.");
-      } finally {
-        setProcessing(false);
       }
+
       setSelectedFiles([]);
       setTotalSize(0);
       setQuarter("");

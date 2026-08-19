@@ -150,5 +150,8 @@ export async function processFiles(files: File[]): Promise<EngineResult> {
       validation: { status: "success", validation_runs: 0 }, reviewQueue: [], auditTrail: [] 
     };
   }
-  return processFile(files[0]);
+  const texts = await Promise.all(files.map(f => f.text()));
+  const combinedText = texts.join("\n");
+  const virtualFile = new File([combinedText], "combined.csv", { type: "text/csv" });
+  return processFile(virtualFile);
 }

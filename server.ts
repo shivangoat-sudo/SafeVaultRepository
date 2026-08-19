@@ -30,7 +30,8 @@ import {
   create2FASetupChallenge,
   create2FAVerifyChallenge,
   get2FAChallenge,
-  twoFactorChallengeStore
+  update2FAChallengeSecret,
+  delete2FAChallenge
 } from "./src/server/auth.js";
 import bcrypt from "bcryptjs";
 import multer from "multer";
@@ -180,7 +181,15 @@ async function startServer() {
       return [reqUser.id];
     }
     if (reqUser.role === "user") {
-      const { data } = await supabase.from("accounts").select("id").eq("role", "customer").eq("owner_id", reqUser.id);
+      const ownerIds = [reqUser.id];
+      if (reqUser.owner_id) {
+        ownerIds.push(reqUser.owner_id);
+        const { data: orgUsers } = await supabase.from("accounts").select("id").eq("owner_id", reqUser.owner_id);
+        if (orgUsers) {
+          orgUsers.forEach(u => ownerIds.push(u.id));
+        }
+      }
+      const { data } = await supabase.from("accounts").select("id").eq("role", "customer").in("owner_id", ownerIds);
       return (data || []).map(c => c.id);
     }
     if (reqUser.role === "organization") {
@@ -363,15 +372,15 @@ async function startServer() {
   }
 
   async function saveAccount2FAState(accountId: string, state: { two_factor_enabled?: boolean; totp_secret?: string | null; last_2fa_verified_at?: string | null }) {
-    try {
-      const updateData: any = {};
-      if (state.two_factor_enabled !== undefined) updateData.two_factor_enabled = state.two_factor_enabled;
-      if (state.totp_secret !== undefined) updateData.totp_secret = state.totp_secret;
-      if (state.last_2fa_verified_at !== undefined) updateData.last_2fa_verified_at = state.last_2fa_verified_at;
+    const updateData: any = {};
+    if (state.two_factor_enabled !== undefined) updateData.two_factor_enabled = state.two_factor_enabled;
+    if (state.totp_secret !== undefined) updateData.totp_secret = state.totp_secret;
+    if (state.last_2fa_verified_at !== undefined) updateData.last_2fa_verified_at = state.last_2fa_verified_at;
 
-      await supabase.from("accounts").update(updateData).eq("id", accountId);
-    } catch (err) {
-      console.warn("Supabase 2FA update notice:", err);
+    const { error } = await supabase.from("accounts").update(updateData).eq("id", accountId);
+    if (error) {
+      console.error("Supabase 2FA update error:", error);
+      throw new Error(`Fout bij bijwerken 2FA-status in database: ${error.message}`);
     }
   }
 
@@ -599,7 +608,7 @@ async function startServer() {
 
       // Generate a new TOTP secret server-side
       const secret = authenticator.generateSecret();
-      challenge.tempSecret = secret;
+      await update2FAChallengeSecret(tempToken, secret);
 
       // Construct OTP URI
       const otpauthUri = authenticator.keyuri(account.name || account.number, "SafeVault", secret);
@@ -636,21 +645,14 @@ async function startServer() {
         return res.status(401).json({ error: "Ongeldige of verlopen 2FA-sessie. Log opnieuw in." });
       }
 
-      if (challenge.attemptCount >= 5) {
-        twoFactorChallengeStore.delete(tempToken);
-        return res.status(401).json({ error: "Te veel mislukte pogingen. Log opnieuw in." });
-      }
-
       const cleanCode = String(code).replace(/[^0-9]/g, "").trim();
       if (cleanCode.length !== 6) {
-        challenge.attemptCount += 1;
         await new Promise((resolve) => setTimeout(resolve, 1000));
         return res.status(400).json({ error: "De verificatiecode is onjuist. Probeer het opnieuw." });
       }
 
       const isValid = authenticator.verify({ token: cleanCode, secret: challenge.tempSecret });
       if (!isValid) {
-        challenge.attemptCount += 1;
         await new Promise((resolve) => setTimeout(resolve, 1000));
         return res.status(400).json({ error: "De verificatiecode is onjuist. Probeer het opnieuw." });
       }
@@ -663,7 +665,7 @@ async function startServer() {
         last_2fa_verified_at: nowIso,
       });
 
-      twoFactorChallengeStore.delete(tempToken);
+      await delete2FAChallenge(tempToken);
 
       const { data: account } = await supabase.from("accounts").select("id, number, name, role, status").eq("id", challenge.userId).single();
       if (!account || account.status !== "active") {
@@ -682,7 +684,7 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error("2FA setup-verify error:", err);
-      res.status(500).json({ error: "Het instellen van tweestapsverificatie is mislukt. Probeer het opnieuw." });
+      res.status(500).json({ error: err.message || "Het instellen van tweestapsverificatie is mislukt. Probeer het opnieuw." });
     }
   });
 
@@ -697,14 +699,8 @@ async function startServer() {
         return res.status(401).json({ error: "Ongeldige of verlopen 2FA-sessie. Log opnieuw in." });
       }
 
-      if (challenge.attemptCount >= 5) {
-        twoFactorChallengeStore.delete(tempToken);
-        return res.status(401).json({ error: "Te veel mislukte pogingen. Log opnieuw in." });
-      }
-
       const cleanCode = String(code).replace(/[^0-9]/g, "").trim();
       if (cleanCode.length !== 6) {
-        challenge.attemptCount += 1;
         await new Promise((resolve) => setTimeout(resolve, 1000));
         return res.status(400).json({ error: "De verificatiecode is onjuist. Probeer het opnieuw." });
       }
@@ -717,12 +713,7 @@ async function startServer() {
       const isValid = authenticator.verify({ token: cleanCode, secret: twoFaState.totp_secret });
 
       if (!isValid) {
-        challenge.attemptCount += 1;
         await new Promise((resolve) => setTimeout(resolve, 1000));
-        if (challenge.attemptCount >= 5) {
-          twoFactorChallengeStore.delete(tempToken);
-          return res.status(401).json({ error: "Te veel mislukte pogingen. Log opnieuw in." });
-        }
         return res.status(400).json({ error: "De verificatiecode is onjuist. Probeer het opnieuw." });
       }
 
@@ -733,7 +724,7 @@ async function startServer() {
         last_2fa_verified_at: nowIso,
       });
 
-      twoFactorChallengeStore.delete(tempToken);
+      await delete2FAChallenge(tempToken);
 
       const { data: account } = await supabase.from("accounts").select("id, number, name, role, status").eq("id", challenge.userId).single();
       if (!account || account.status !== "active") {
@@ -750,9 +741,9 @@ async function startServer() {
         account: sanitizeAccount(account),
         expires_at: expiresAt
       });
-    } catch (err) {
+    } catch (err: any) {
       console.error("2FA verify error:", err);
-      res.status(500).json({ error: "Verificatie mislukt. Probeer het opnieuw." });
+      res.status(500).json({ error: err.message || "Verificatie mislukt. Probeer het opnieuw." });
     }
   });
 
@@ -1108,26 +1099,22 @@ async function startServer() {
       return res.status(400).json({ error: "Geen bestanden meegeleverd." });
     }
 
-    // Determine custom organization upload size limits
+    // Determine upload size limits and retention years from settings table
     let maxUploadBytes = 52428800; // default 50MB
+    let retentionYears = 7;
     try {
-      const { data: customerAcc } = await supabase.from("accounts").select("owner_id").eq("id", user.id).single();
-      if (customerAcc && customerAcc.owner_id) {
-        const { data: ownerAcc } = await supabase.from("accounts").select("id, number").eq("id", customerAcc.owner_id).single();
-        if (ownerAcc && String(ownerAcc.number).startsWith("2")) {
-          const { data: setRec } = await supabase.from("settings").select("max_upload_bytes").eq("id", 1).single();
-          maxUploadBytes = setRec?.max_upload_bytes || 52428800;
-        }
-      }
+      const { data: setRec } = await supabase.from("settings").select("max_upload_bytes, retention_years").eq("id", 1).single();
+      if (setRec?.max_upload_bytes) maxUploadBytes = setRec.max_upload_bytes;
+      if (setRec?.retention_years) retentionYears = setRec.retention_years;
     } catch (e) {
-      console.error("Error determining custom organization upload size limit:", e);
+      console.error("Error fetching settings for file upload:", e);
     }
 
     // Check sizes of files
     for (const file of files) {
       if (file.size > maxUploadBytes) {
         return res.status(400).json({
-          error: `Bestand "${file.originalname}" is groter dan de toegestane limiet van ${Math.round(maxUploadBytes / 1024 / 1024)} MB voor uw organisatie.`
+          error: `Bestand "${file.originalname}" is groter dan de toegestane limiet van ${Math.round(maxUploadBytes / 1024 / 1024)} MB.`
         });
       }
     }
@@ -1136,6 +1123,9 @@ async function startServer() {
     const cat = category || "proof";
     const qtr = normalizeQuarter(quarter) || "Q1";
     const yr = year ? parseInt(year, 10) : new Date().getFullYear();
+
+    const retentionExpiresAt = new Date();
+    retentionExpiresAt.setFullYear(retentionExpiresAt.getFullYear() + retentionYears);
 
     const uploaded = [];
     for (const file of files) {
@@ -1146,7 +1136,7 @@ async function startServer() {
 
       let dbDataId = fileId;
 
-      const { storageError } = await supabase.storage
+      const { error: storageError } = await supabase.storage
         .from("customer-files")
         .upload(filePath, file.buffer, {
           contentType: file.mimetype,
@@ -1154,12 +1144,13 @@ async function startServer() {
         });
 
       if (storageError) {
-        console.error("Storage error:", storageError);
+        console.error("Storage upload error:", storageError);
+        return res.status(500).json({ error: `Opslaan in storage mislukt: ${storageError.message}` });
       }
 
       // Insert DB record
       try {
-        const { data: dbData } = await supabase
+        const { data: dbData, error: dbError } = await supabase
           .from("files")
           .insert([{
             customer_id: user.id,
@@ -1170,10 +1161,16 @@ async function startServer() {
             storage_path: filePath,
             category: cat,
             quarter: qtr,
-            year: yr
+            year: yr,
+            expires_at: retentionExpiresAt.toISOString()
           }])
           .select()
           .single();
+        
+        if (dbError) {
+          console.error("DB error inserting file record:", dbError);
+          return res.status(500).json({ error: `Opslaan van bestandgegevens mislukt: ${dbError.message}` });
+        }
         
         if (dbData) {
           dbDataId = dbData.id;
@@ -2636,8 +2633,14 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
 
   app.post("/api/owner/delete-user", requireAuth, async (req: any, res) => {
     if (req.user.role !== "owner") return res.status(403).json({ error: "Geen toegang" });
-    const { userId } = req.body;
+    const { userId, password } = req.body;
     if (!userId) return res.status(400).json({ error: "userId is verplicht" });
+    if (!password) return res.status(400).json({ error: "Huidig wachtwoord is verplicht ter bevestiging van de verwijdering." });
+
+    const { data: ownerCred } = await supabase.from("credentials").select("password_hash").eq("account_id", req.user.id).single();
+    if (!ownerCred || !(await comparePassword(password, ownerCred.password_hash))) {
+      return res.status(401).json({ error: "Onjuist wachtwoord. Verwijdering geannuleerd." });
+    }
 
     const { data: custs } = await supabase.from("accounts").select("id").eq("owner_id", userId);
     const custIds = (custs || []).map(c => c.id);
@@ -2810,6 +2813,15 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
     if (req.user.role !== "owner") return res.status(403).json({ error: "Geen toegang" });
     
     try {
+      const { password } = req.body || {};
+      if (!password) {
+        return res.status(400).json({ error: "Huidig wachtwoord is verplicht ter bevestiging van accountverwijdering." });
+      }
+      const { data: ownerCred } = await supabase.from("credentials").select("password_hash").eq("account_id", req.user.id).single();
+      if (!ownerCred || !(await comparePassword(password, ownerCred.password_hash))) {
+        return res.status(401).json({ error: "Onjuist wachtwoord. Accountverwijdering geannuleerd." });
+      }
+
       const { data: owners, error: ownersErr } = await supabase
         .from("accounts")
         .select("id")
@@ -3424,6 +3436,17 @@ app.post("/api/owner/create-user", requireAuth, async (req: any, res) => {
 
   app.post("/api/purge", requireAuth, async (req: any, res) => {
     if (req.user.role !== "owner") return res.status(403).json({ error: "Geen toegang" });
+    if (process.env.NODE_ENV === "production" && !process.env.ALLOW_PURGE) {
+      return res.status(403).json({ error: "Purge is uitgeschakeld op deze omgeving." });
+    }
+    const { password } = req.body || {};
+    if (!password) {
+      return res.status(400).json({ error: "Wachtwoord is verplicht ter bevestiging van de opschoning." });
+    }
+    const { data: ownerCred } = await supabase.from("credentials").select("password_hash").eq("account_id", req.user.id).single();
+    if (!ownerCred || !(await comparePassword(password, ownerCred.password_hash))) {
+      return res.status(401).json({ error: "Onjuist wachtwoord." });
+    }
     
     try {
       await supabase.from("notifications").delete().neq("id", "00000000-0000-0000-0000-000000000000");
