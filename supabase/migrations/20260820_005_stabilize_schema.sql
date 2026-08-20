@@ -1,20 +1,10 @@
 -- SafeVault stabilization migration
 -- Repairs schema drift without deleting application data.
 
--- Credentials must be one-to-one with an account because the application
--- authenticates against exactly one credential row per account.
-DO $$
-BEGIN
-  DELETE FROM public.credentials c
-  USING public.credentials older
-  WHERE c.account_id = older.account_id
-    AND c.created_at < older.created_at;
-EXCEPTION WHEN undefined_table THEN
-  NULL;
-END $$;
-
-CREATE UNIQUE INDEX IF NOT EXISTS ux_credentials_account_id
-  ON public.credentials(account_id);
+-- Credentials must be one-to-one with an account. Do not delete or rewrite
+-- existing credential rows here: duplicate data must be reconciled explicitly
+-- after inspection of the live database before a UNIQUE constraint is added.
+CREATE INDEX IF NOT EXISTS idx_credentials_account_id ON public.credentials(account_id);
 
 -- Note attachment metadata is persisted directly on notes by the API.
 ALTER TABLE public.notes ADD COLUMN IF NOT EXISTS file_path TEXT;
@@ -60,12 +50,11 @@ CREATE TRIGGER sync_archive_files_actor_columns
 BEFORE INSERT OR UPDATE ON public.archive_files
 FOR EACH ROW EXECUTE FUNCTION public.sync_safevault_actor_columns();
 
--- Backfill compatibility columns from the canonical values.
+-- Backfill compatibility columns from canonical values.
 UPDATE public.communications SET user_id = sender_id WHERE user_id IS NULL;
 UPDATE public.archive_files SET user_id = uploader_id WHERE user_id IS NULL;
 
--- The application currently uses the safevault_archives bucket for archive
--- storage. Keep the migration authoritative; the server also verifies it.
+-- Ensure the intended owner defaults exist for a fresh installation.
 INSERT INTO public.settings (
   id,
   max_customer_accounts_per_batch,
