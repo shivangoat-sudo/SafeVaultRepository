@@ -1,7 +1,7 @@
 {
-  "name": "vite-react-typescript-starter",
+  "name": "safevault",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
@@ -9,7 +9,9 @@
     "start": "node dist/server.cjs",
     "lint": "eslint .",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.app.json"
+    "typecheck": "tsc --noEmit -p tsconfig.app.json",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run lint && npm run test && npm run build"
   },
   "dependencies": {
     "@google/genai": "^2.17.1",
@@ -33,6 +35,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
+    "vitest": "^3.2.4",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
