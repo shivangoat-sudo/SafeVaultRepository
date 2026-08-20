@@ -11,8 +11,21 @@ export type TwoFactorChallenge = {
   attemptCount: number;
 };
 
-export function generateToken(length = 32) {
-  return crypto.randomBytes(length).toString("hex");
+export function generateToken(bytes = 32): string {
+  return crypto.randomBytes(bytes).toString("hex");
+}
+
+export async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, 10);
+}
+
+export async function comparePassword(password: string, hash: string): Promise<boolean> {
+  if (!password || !hash) return false;
+  try {
+    return await bcrypt.compare(password, hash);
+  } catch {
+    return false;
+  }
 }
 
 export async function create2FASetupChallenge(userId: string): Promise<string> {
@@ -27,8 +40,8 @@ export async function create2FASetupChallenge(userId: string): Promise<string> {
   });
 
   if (error) {
-    console.error("Error creating 2FA setup challenge in DB:", error);
-    throw new Error("2FA setup challenge kon niet worden opgeslagen in de database.");
+    console.error("Error creating 2FA setup challenge:", error);
+    throw new Error("2FA setup challenge kon niet worden opgeslagen.");
   }
 
   return tempToken;
@@ -46,8 +59,8 @@ export async function create2FAVerifyChallenge(userId: string): Promise<string> 
   });
 
   if (error) {
-    console.error("Error creating 2FA verify challenge in DB:", error);
-    throw new Error("2FA verificatie challenge kon niet worden opgeslagen in de database.");
+    console.error("Error creating 2FA verify challenge:", error);
+    throw new Error("2FA verificatiechallenge kon niet worden opgeslagen.");
   }
 
   return tempToken;
@@ -58,22 +71,24 @@ export async function get2FAChallenge(tempToken: string): Promise<TwoFactorChall
 
   const { data, error } = await supabase
     .from("two_factor_challenges")
-    .select("*")
+    .select("id, account_id, temp_token, temp_secret, expires_at")
     .eq("temp_token", tempToken)
-    .single();
+    .maybeSingle();
 
   if (error || !data) return null;
 
-  if (new Date(data.expires_at) < new Date()) {
-    await supabase.from("two_factor_challenges").delete().eq("temp_token", tempToken);
+  if (new Date(data.expires_at).getTime() <= Date.now()) {
+    await delete2FAChallenge(tempToken);
     return null;
   }
 
+  const type = data.temp_secret === "verify" ? "verify" : data.temp_secret === "setup" ? "setup" : null;
+  if (!type) return null;
+
   return {
-    id: data.temp_token,
+    id: data.id,
     userId: data.account_id,
-    type: data.temp_secret === "setup" ? "setup" : (data.temp_secret === "verify" ? "verify" : "setup"),
-    tempSecret: data.temp_secret !== "setup" && data.temp_secret !== "verify" ? data.temp_secret : undefined,
+    type,
     expiresAt: new Date(data.expires_at),
     attemptCount: 0,
   };
@@ -86,40 +101,34 @@ export async function update2FAChallengeSecret(tempToken: string, tempSecret: st
     .eq("temp_token", tempToken);
 
   if (error) {
-    console.error("Error updating 2FA challenge secret in DB:", error);
-    throw new Error("Kon 2FA geheim niet bijwerken in de database.");
+    console.error("Error updating 2FA challenge secret:", error);
+    throw new Error("Kon 2FA-geheim niet bijwerken.");
   }
 }
 
 export async function delete2FAChallenge(tempToken: string): Promise<void> {
   if (!tempToken) return;
-  const { error } = await supabase.from("two_factor_challenges").delete().eq("temp_token", tempToken);
-  if (error) {
-    console.warn("Notice: 2FA challenge deletion warning:", error);
-  }
-}
-
-export async function hashPassword(password: string) {
-  return bcrypt.hash(password, 10);
-}
-
-export async function comparePassword(password: string, hash: string) {
-  return bcrypt.compare(password, hash);
+  const { error } = await supabase
+    .from("two_factor_challenges")
+    .delete()
+    .eq("temp_token", tempToken);
+  if (error) console.warn("2FA challenge deletion warning:", error.message);
 }
 
 export async function createSession(accountId: string, hours = 5) {
+  const safeHours = Number.isFinite(hours) && hours > 0 ? hours : 5;
   const token = generateToken(32);
-  const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+  const expiresAt = new Date(Date.now() + safeHours * 60 * 60 * 1000).toISOString();
 
   const { data, error } = await supabase
     .from("sessions")
-    .insert([{ account_id: accountId, token, expires_at: expiresAt }])
+    .insert({ account_id: accountId, token, expires_at: expiresAt })
     .select("token, expires_at")
     .single();
 
   if (error || !data) {
-    console.error("Error creating session in database:", error);
-    throw new Error("Sessie kon niet worden aangemaakt in de database.");
+    console.error("Error creating session:", error);
+    throw new Error("Sessie kon niet worden aangemaakt.");
   }
 
   return { token: data.token, expiresAt: data.expires_at };
@@ -132,11 +141,11 @@ export async function validateSession(token: string) {
     .from("sessions")
     .select("account_id, expires_at")
     .eq("token", token)
-    .single();
+    .maybeSingle();
 
   if (error || !session) return null;
 
-  if (new Date(session.expires_at) < new Date()) {
+  if (new Date(session.expires_at).getTime() <= Date.now()) {
     await supabase.from("sessions").delete().eq("token", token);
     return null;
   }
@@ -145,14 +154,13 @@ export async function validateSession(token: string) {
     .from("accounts")
     .select("id, number, name, email, role, status, owner_id")
     .eq("id", session.account_id)
-    .single();
+    .maybeSingle();
 
   if (accountError || !account || account.status !== "active") return null;
-
   return account;
 }
 
-export async function revokeSession(token: string) {
+export async function revokeSession(token: string): Promise<void> {
   if (!token) return;
   await supabase.from("sessions").delete().eq("token", token);
 }
