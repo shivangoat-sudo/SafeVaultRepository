@@ -22,7 +22,7 @@ export function LoginPage() {
   const [loadingQR, setLoadingQR] = useState(false);
 
   // Setup state (platform initialisation)
-  const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
+  const [needsSetup, setNeedsSetup] = useState<boolean>(false);
   const [setupName, setSetupName] = useState("");
   const [setupNumber, setSetupNumber] = useState("");
   const [setupPassword, setSetupPassword] = useState("");
@@ -31,7 +31,15 @@ export function LoginPage() {
   const [setupCreatedData, setSetupCreatedData] = useState<{ name: string; number: string; password: string } | null>(null);
 
   useEffect(() => {
-    api.setupStatus().then((r) => setNeedsSetup(!r.initialized)).catch(() => setNeedsSetup(false));
+    api.setupStatus()
+      .then((r) => {
+        // If initialized is false, then needsSetup is true. Otherwise false.
+        setNeedsSetup(!r.initialized);
+      })
+      .catch(() => {
+        // Default to false (already initialized) so owner is never locked out or forced to re-init
+        setNeedsSetup(false);
+      });
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {

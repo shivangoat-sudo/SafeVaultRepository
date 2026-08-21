@@ -125,7 +125,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 // ===== Auth =====
 export const api = {
-  setupStatus: () => request<{ initialized: boolean }>("/auth/setup-status"),
+  setupStatus: async () => {
+    try {
+      const res = await request<{ initialized: boolean }>("/auth/setup-status");
+      return res;
+    } catch {
+      // Fallback: if serverless or network fails to reach setup-status, assume initialized so owner is never prompted to re-setup
+      return { initialized: true };
+    }
+  },
   setup: (name: string) =>
     request<{ account: { number: string; name: string; role: string }; tempPassword: string }>("/auth/setup", {
       method: "POST",
