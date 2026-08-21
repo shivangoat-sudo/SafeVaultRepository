@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/api";
 import { useToast } from "@/components/Toast";
+import { useAuth } from "@/auth";
 import { Modal } from "@/components/Modal";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ChatInterface } from "@/components/ChatInterface";
@@ -8,13 +9,14 @@ import { formatBytes, formatDate, formatDateTime, Spinner, EmptyState, PageHeade
 import { VatCalculator } from "@/components/VatCalculator";
 import type {
   CustomerRow, ProfileData, FileRow, ArchiveFolder, ArchiveFile, ArchiveNote,
-  UserNote, Communication, AdminStatusRow,
+  UserNote, Communication, CommunicationAttachment, AdminStatusRow,
 } from "@/types";
 import {
   User as UserIcon, FileText, FolderArchive, StickyNote,
   Mail, BarChart3, Folder, FolderPlus, FilePlus, Download, Trash2, Edit3,
   ChevronRight, Save, X, Search, Home, FileImage, FileType, NotebookPen,
-  Send, Calculator, Globe, Paperclip, ArrowRightLeft,
+  Send, Calculator, Globe, Paperclip, ArrowRightLeft, FolderSymlink, RotateCcw,
+  Image as ImageIcon, UploadCloud, Eye,
 } from "lucide-react";
 import { TransferCustomerModal } from "@/components/TransferCustomerModal";
 
@@ -47,6 +49,8 @@ const QUARTERS = ["Q1", "Q2", "Q3", "Q4"] as const;
 export function CustomerDossier({ customer, onBack }: { customer: CustomerRow; onBack: () => void }) {
   const [tab, setTab] = useState<DossierTab>("profile");
   const [showTransferModal, setShowTransferModal] = useState(false);
+  const { account } = useAuth();
+  const canTransfer = account?.role === "organization" || (account?.role === "user" && Boolean(account?.is_org_user));
 
   return (
     <div className="space-y-6">
@@ -55,10 +59,12 @@ export function CustomerDossier({ customer, onBack }: { customer: CustomerRow; o
         subtitle={`Klant nr. ${customer.number}`}
         onBack={onBack}
         action={
-          <button onClick={() => setShowTransferModal(true)} className="btn-secondary text-xs">
-            <ArrowRightLeft className="h-3.5 w-3.5 mr-1.5 text-brand-600" />
-            Klant Overdragen
-          </button>
+          canTransfer ? (
+            <button onClick={() => setShowTransferModal(true)} className="btn-secondary text-xs">
+              <ArrowRightLeft className="h-3.5 w-3.5 mr-1.5 text-brand-600" />
+              Klant Overdragen
+            </button>
+          ) : null
         }
       />
       <div className="border-b border-ink-200 overflow-x-auto">
@@ -369,6 +375,7 @@ function ArchiveTab({ customer }: { customer: CustomerRow }) {
   const [breadcrumbs, setBreadcrumbs] = useState<ArchiveFolder[]>([]);
   const [folders, setFolders] = useState<ArchiveFolder[]>([]);
   const [files, setFiles] = useState<ArchiveFile[]>([]);
+  const [notes, setNotes] = useState<UserNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
@@ -377,6 +384,7 @@ function ArchiveTab({ customer }: { customer: CustomerRow }) {
   const [renameTarget, setRenameTarget] = useState<{ kind: "folder" | "file"; id: string; name: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ kind: "folder" | "file"; id: string; name: string } | null>(null);
   const [notesTarget, setNotesTarget] = useState<{ kind: "folder" | "file"; id: string; name: string } | null>(null);
+  const [editingNote, setEditingNote] = useState<UserNote | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -384,6 +392,7 @@ function ArchiveTab({ customer }: { customer: CustomerRow }) {
       const res = await api.dossierArchive(customer.id, folderId);
       setFolders(res.folders);
       setFiles(res.files);
+      setNotes(res.notes || []);
     } catch {
       push("error", "Archief kon niet worden geladen.");
     } finally {
@@ -483,6 +492,35 @@ function ArchiveTab({ customer }: { customer: CustomerRow }) {
     }
   };
 
+  const handleRestoreNote = async (noteId: string) => {
+    try {
+      await api.dossierRestoreNoteFromArchive(noteId);
+      push("success", "Notitie teruggezet naar reguliere notities.");
+      load();
+    } catch (err) {
+      push("error", err instanceof Error ? err.message : "Terugzetten mislukt.");
+    }
+  };
+
+  const handleDeleteNote = async (noteId: string) => {
+    try {
+      await api.dossierDeleteNote(noteId);
+      push("success", "Notitie verwijderd.");
+      load();
+    } catch {
+      push("error", "Verwijderen mislukt.");
+    }
+  };
+
+  const handleViewAttachment = async (filePath: string) => {
+    try {
+      const res = await api.dossierNoteAttachmentView(filePath);
+      window.open(res.url, "_blank");
+    } catch {
+      push("error", "Bijlage kon niet worden geopend.");
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -510,42 +548,129 @@ function ArchiveTab({ customer }: { customer: CustomerRow }) {
 
       {loading ? (
         <div className="flex justify-center py-12"><Spinner className="h-6 w-6 text-ink-400" /></div>
-      ) : folders.length === 0 && files.length === 0 ? (
+      ) : folders.length === 0 && files.length === 0 && notes.length === 0 ? (
         <div className="card"><EmptyState icon={FolderArchive} title="Archief is leeg" subtitle="Voeg mappen of bestanden toe om documenten te bewaren." /></div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {folders.map((f) => (
-            <div key={f.id} className="card p-4 group flex items-center gap-3 cursor-pointer hover:border-brand-300 transition-colors">
-              <button onClick={() => openFolder(f)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
-                <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-brand-600 flex-shrink-0">
-                  <Folder className="h-5 w-5" />
-                </span>
-                <span className="text-sm font-medium text-ink-900 truncate">{f.name}</span>
-              </button>
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={() => setNotesTarget({ kind: "folder", id: f.id, name: f.name })} className="btn-ghost p-1.5" title="Notities"><NotebookPen className="h-3.5 w-3.5" /></button>
-                <button onClick={() => setRenameTarget({ kind: "folder", id: f.id, name: f.name })} className="btn-ghost p-1.5" title="Hernoemen"><Edit3 className="h-3.5 w-3.5" /></button>
-                <button onClick={() => setDeleteTarget({ kind: "folder", id: f.id, name: f.name })} className="btn-ghost p-1.5 text-danger-600 hover:text-danger-700" title="Verwijderen"><Trash2 className="h-3.5 w-3.5" /></button>
-              </div>
-            </div>
-          ))}
-          {files.map((f) => (
-            <div key={f.id} className="card p-4 group flex items-center gap-3 hover:border-brand-300 transition-colors">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <FileIcon name={f.name} />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-ink-900 truncate">{f.name}</p>
-                  <p className="text-xs text-ink-400">{formatBytes(f.size_bytes)} · {formatDate(f.created_at)}</p>
+        <div className="space-y-6">
+          {(folders.length > 0 || files.length > 0) && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {folders.map((f) => (
+                <div key={f.id} className="card p-4 group flex items-center gap-3 cursor-pointer hover:border-brand-300 transition-colors">
+                  <button onClick={() => openFolder(f)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
+                    <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-brand-600 flex-shrink-0">
+                      <Folder className="h-5 w-5" />
+                    </span>
+                    <span className="text-sm font-medium text-ink-900 truncate">{f.name}</span>
+                  </button>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => setNotesTarget({ kind: "folder", id: f.id, name: f.name })} className="btn-ghost p-1.5" title="Mapnotities"><NotebookPen className="h-3.5 w-3.5" /></button>
+                    <button onClick={() => setRenameTarget({ kind: "folder", id: f.id, name: f.name })} className="btn-ghost p-1.5" title="Hernoemen"><Edit3 className="h-3.5 w-3.5" /></button>
+                    <button onClick={() => setDeleteTarget({ kind: "folder", id: f.id, name: f.name })} className="btn-ghost p-1.5 text-danger-600 hover:text-danger-700" title="Verwijderen"><Trash2 className="h-3.5 w-3.5" /></button>
+                  </div>
                 </div>
+              ))}
+              {files.map((f) => (
+                <div key={f.id} className="card p-4 group flex items-center gap-3 hover:border-brand-300 transition-colors">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <FileIcon name={f.name} />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-ink-900 truncate">{f.name}</p>
+                      <p className="text-xs text-ink-400">{formatBytes(f.size_bytes)} · {formatDate(f.created_at)}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => handleDownload(f)} className="btn-ghost p-1.5" title="Downloaden"><Download className="h-3.5 w-3.5" /></button>
+                    <button onClick={() => setNotesTarget({ kind: "file", id: f.id, name: f.name })} className="btn-ghost p-1.5" title="Bestandsnotities"><NotebookPen className="h-3.5 w-3.5" /></button>
+                    <button onClick={() => setRenameTarget({ kind: "file", id: f.id, name: f.name })} className="btn-ghost p-1.5" title="Hernoemen"><Edit3 className="h-3.5 w-3.5" /></button>
+                    <button onClick={() => setDeleteTarget({ kind: "file", id: f.id, name: f.name })} className="btn-ghost p-1.5 text-danger-600 hover:text-danger-700" title="Verwijderen"><Trash2 className="h-3.5 w-3.5" /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {notes.length > 0 && (
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center gap-2 border-b border-ink-150 pb-2">
+                <StickyNote className="h-4 w-4 text-ink-500" />
+                <h3 className="text-sm font-semibold text-ink-800">Gearchiveerde Notities ({notes.length})</h3>
               </div>
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={() => handleDownload(f)} className="btn-ghost p-1.5" title="Downloaden"><Download className="h-3.5 w-3.5" /></button>
-                <button onClick={() => setNotesTarget({ kind: "file", id: f.id, name: f.name })} className="btn-ghost p-1.5" title="Notities"><NotebookPen className="h-3.5 w-3.5" /></button>
-                <button onClick={() => setRenameTarget({ kind: "file", id: f.id, name: f.name })} className="btn-ghost p-1.5" title="Hernoemen"><Edit3 className="h-3.5 w-3.5" /></button>
-                <button onClick={() => setDeleteTarget({ kind: "file", id: f.id, name: f.name })} className="btn-ghost p-1.5 text-danger-600 hover:text-danger-700" title="Verwijderen"><Trash2 className="h-3.5 w-3.5" /></button>
+              <div className="space-y-3">
+                {notes.map((n) => (
+                  <div key={n.id} className="card p-4 bg-ink-50/30 border-ink-200">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {n.title && <h4 className="text-sm font-semibold text-ink-900">{n.title}</h4>}
+                          {n.visible_to_customer && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-medium text-brand-700 border border-brand-200">
+                              <Globe className="h-3 w-3" /> Zichtbaar voor klant
+                            </span>
+                          )}
+                          <span className="inline-flex items-center gap-1 rounded-full bg-ink-100 px-2 py-0.5 text-[10px] font-medium text-ink-600">
+                            <FolderArchive className="h-3 w-3" /> Gearchiveerd
+                          </span>
+                        </div>
+                        {n.body && <p className="text-sm text-ink-700 whitespace-pre-wrap mt-1.5">{n.body}</p>}
+
+                        {/* Attachments */}
+                        {n.attachments && n.attachments.length > 0 ? (
+                          <div className="mt-3 space-y-2">
+                            {n.attachments.map((att, idx) => (
+                              <div key={att.id || idx} className="flex items-center gap-2 p-2 bg-white border border-ink-150 rounded-lg text-xs max-w-md">
+                                <Paperclip className="h-3.5 w-3.5 text-ink-500 flex-shrink-0" />
+                                <span className="font-medium text-ink-700 truncate flex-1" title={att.file_name}>
+                                  {att.file_name}
+                                </span>
+                                {att.file_size && <span className="text-[10px] text-ink-400 font-mono">{formatBytes(att.file_size)}</span>}
+                                <button
+                                  onClick={() => handleViewAttachment(att.file_path)}
+                                  className="btn-ghost py-1 px-2 text-brand-600 hover:text-brand-700 font-semibold"
+                                >
+                                  Inzien
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : n.file_path && (
+                          <div className="mt-3 flex items-center gap-2 p-2 bg-white border border-ink-150 rounded-lg text-xs max-w-md">
+                            <Paperclip className="h-3.5 w-3.5 text-ink-500 flex-shrink-0" />
+                            <span className="font-medium text-ink-700 truncate flex-1" title={n.file_name ?? ""}>
+                              {n.file_name || "Bijlage"}
+                            </span>
+                            {n.file_size && <span className="text-[10px] text-ink-400 font-mono">{formatBytes(n.file_size)}</span>}
+                            <button
+                              onClick={() => handleViewAttachment(n.file_path!)}
+                              className="btn-ghost py-1 px-2 text-brand-600 hover:text-brand-700 font-semibold"
+                            >
+                              Inzien
+                            </button>
+                          </div>
+                        )}
+
+                        <p className="text-xs text-ink-400 mt-2">{formatDateTime(n.updated_at)}</p>
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <button
+                          onClick={() => handleRestoreNote(n.id)}
+                          className="btn-ghost p-1.5 text-brand-600 hover:text-brand-700 hover:bg-brand-50"
+                          title="Terugzetten naar notities"
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                        </button>
+                        <button onClick={() => setEditingNote(n)} className="btn-ghost p-1.5" title="Wijzigen">
+                          <Edit3 className="h-3.5 w-3.5" />
+                        </button>
+                        <button onClick={() => handleDeleteNote(n.id)} className="btn-ghost p-1.5 text-danger-600 hover:text-danger-700" title="Verwijderen">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-          ))}
+          )}
         </div>
       )}
 
@@ -560,6 +685,9 @@ function ArchiveTab({ customer }: { customer: CustomerRow }) {
       <RenameModal target={renameTarget} onClose={() => setRenameTarget(null)} onConfirm={handleRename} />
       <ConfirmDeleteModal target={deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} />
       <ArchiveNotesModal target={notesTarget} onClose={() => setNotesTarget(null)} />
+      {editingNote && (
+        <NoteFormModal customer={customer} note={editingNote} onClose={() => setEditingNote(null)} onSaved={load} />
+      )}
     </div>
   );
 }
@@ -667,6 +795,7 @@ function NotesTab({ customer }: { customer: CustomerRow }) {
   const [notes, setNotes] = useState<UserNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<UserNote | null>(null);
+  const [movingNote, setMovingNote] = useState<UserNote | null>(null);
   const [showForm, setShowForm] = useState(false);
 
   const load = useCallback(async () => {
@@ -706,7 +835,7 @@ function NotesTab({ customer }: { customer: CustomerRow }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-xs text-ink-400 flex items-center gap-1.5">
-          <StickyNote className="h-3.5 w-3.5" /> U kunt per notitie instellen of de klant deze mag inzien.
+          <StickyNote className="h-3.5 w-3.5" /> U kunt per notitie instellen of de klant deze mag inzien of deze verplaatsen naar een archiefmap.
         </p>
         <button onClick={() => { setEditing(null); setShowForm(true); }} className="btn-primary"><NotebookPen className="h-4 w-4" /> Nieuwe notitie</button>
       </div>
@@ -730,7 +859,26 @@ function NotesTab({ customer }: { customer: CustomerRow }) {
                   </div>
                   {n.body && <p className="text-sm text-ink-700 whitespace-pre-wrap mt-1.5">{n.body}</p>}
                   
-                  {n.file_path && (
+                  {/* Multiple Attachments List */}
+                  {(n.attachments && n.attachments.length > 0) ? (
+                    <div className="mt-3 space-y-2">
+                      {n.attachments.map((att, idx) => (
+                        <div key={att.id || idx} className="flex items-center gap-2 p-2 bg-ink-50/50 hover:bg-ink-50 border border-ink-150 rounded-lg text-xs max-w-md transition-colors">
+                          <Paperclip className="h-3.5 w-3.5 text-ink-500 flex-shrink-0" />
+                          <span className="font-medium text-ink-700 truncate flex-1" title={att.file_name}>
+                            {att.file_name}
+                          </span>
+                          {att.file_size && <span className="text-[10px] text-ink-400 font-mono">{formatBytes(att.file_size)}</span>}
+                          <button
+                            onClick={() => handleViewAttachment(att.file_path)}
+                            className="btn-ghost py-1 px-2 text-brand-600 hover:text-brand-700 font-semibold"
+                          >
+                            Inzien
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : n.file_path && (
                     <div className="mt-3 flex items-center gap-2 p-2 bg-ink-50/50 hover:bg-ink-50 border border-ink-150 rounded-lg text-xs max-w-md">
                       <Paperclip className="h-3.5 w-3.5 text-ink-500 flex-shrink-0" />
                       <span className="font-medium text-ink-700 truncate flex-1" title={n.file_name ?? ""}>
@@ -749,6 +897,13 @@ function NotesTab({ customer }: { customer: CustomerRow }) {
                   <p className="text-xs text-ink-400 mt-2">{formatDateTime(n.updated_at)}</p>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
+                  <button
+                    onClick={() => setMovingNote(n)}
+                    className="btn-ghost p-1.5 text-ink-600 hover:text-brand-600"
+                    title="Verplaatsen naar archiefmap"
+                  >
+                    <FolderSymlink className="h-4 w-4" />
+                  </button>
                   <button onClick={() => { setEditing(n); setShowForm(true); }} className="btn-ghost p-1.5" title="Wijzigen"><Edit3 className="h-3.5 w-3.5" /></button>
                   <button onClick={() => handleDelete(n.id)} className="btn-ghost p-1.5 text-danger-600 hover:text-danger-700" title="Verwijderen"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
@@ -758,7 +913,177 @@ function NotesTab({ customer }: { customer: CustomerRow }) {
         </div>
       )}
       {showForm && <NoteFormModal customer={customer} note={editing} onClose={() => setShowForm(false)} onSaved={load} />}
+      {movingNote && (
+        <MoveNoteToArchiveModal
+          customer={customer}
+          note={movingNote}
+          onClose={() => setMovingNote(null)}
+          onMoved={load}
+        />
+      )}
     </div>
+  );
+}
+
+function MoveNoteToArchiveModal({
+  customer,
+  note,
+  onClose,
+  onMoved,
+}: {
+  customer: CustomerRow;
+  note: UserNote;
+  onClose: () => void;
+  onMoved: () => void;
+}) {
+  const { push } = useToast();
+  const [folders, setFolders] = useState<ArchiveFolder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedFolderId, setSelectedFolderId] = useState<string>("");
+  const [isCreatingNew, setIsCreatingNew] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    api.dossierArchiveAllFolders(customer.id)
+      .then((res) => {
+        if (!active) return;
+        setFolders(res.folders || []);
+        if (res.folders && res.folders.length > 0) {
+          setSelectedFolderId(res.folders[0].id);
+        } else {
+          setIsCreatingNew(true);
+        }
+      })
+      .catch(() => {
+        if (active) push("error", "Kon mappenlijst niet ophalen.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [customer.id, push]);
+
+  const handleMove = async () => {
+    setSubmitting(true);
+    try {
+      let targetFolderId = selectedFolderId;
+      if (isCreatingNew) {
+        const trimmedName = newFolderName.trim();
+        if (!trimmedName) {
+          push("error", "Vul een geldige mapnaam in.");
+          setSubmitting(false);
+          return;
+        }
+        const created = await api.dossierCreateFolder(customer.id, trimmedName, null);
+        targetFolderId = created.folder.id;
+      }
+
+      if (!targetFolderId) {
+        push("error", "Selecteer een doelmap.");
+        setSubmitting(false);
+        return;
+      }
+
+      await api.dossierMoveNoteToArchive(note.id, targetFolderId);
+      push("success", "Notitie succesvol verplaatst naar het archief.");
+      onClose();
+      onMoved();
+    } catch (err) {
+      push("error", err instanceof Error ? err.message : "Verplaatsen mislukt.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={true}
+      onClose={onClose}
+      title="Notitie verplaatsen naar archief"
+      size="sm"
+      footer={
+        <>
+          <button onClick={onClose} className="btn-secondary" disabled={submitting}>
+            Annuleren
+          </button>
+          <button onClick={handleMove} className="btn-primary" disabled={submitting || loading}>
+            {submitting ? <Spinner className="h-4 w-4" /> : <FolderSymlink className="h-4 w-4" />} Verplaatsen
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <p className="text-xs text-ink-600">
+          Verplaats notitie <span className="font-semibold text-ink-900">{note.title || "zonder titel"}</span> naar een archiefmap. De notitie inclusief alle bijlagen blijft behouden.
+        </p>
+
+        {loading ? (
+          <div className="flex justify-center py-6">
+            <Spinner className="h-5 w-5 text-ink-400" />
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {folders.length > 0 && !isCreatingNew ? (
+              <div>
+                <label className="block text-xs font-medium text-ink-700 mb-1">
+                  Kies archiefmap
+                </label>
+                <select
+                  value={selectedFolderId}
+                  onChange={(e) => setSelectedFolderId(e.target.value)}
+                  className="input text-sm"
+                >
+                  {folders.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      📁 {f.name}
+                    </option>
+                  ))}
+                </select>
+                <div className="mt-2 text-right">
+                  <button
+                    type="button"
+                    onClick={() => setIsCreatingNew(true)}
+                    className="text-xs font-medium text-brand-600 hover:text-brand-700 inline-flex items-center gap-1"
+                  >
+                    <FolderPlus className="h-3.5 w-3.5" /> Nieuwe map aanmaken
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-xs font-medium text-ink-700 mb-1">
+                  Nieuwe archiefmap naam
+                </label>
+                <input
+                  type="text"
+                  placeholder="Bijv. Jaarwerk 2025, Belastingaangifte..."
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  className="input text-sm"
+                  autoFocus
+                />
+                {folders.length > 0 && (
+                  <div className="mt-2 text-right">
+                    <button
+                      type="button"
+                      onClick={() => setIsCreatingNew(false)}
+                      className="text-xs font-medium text-ink-600 hover:text-ink-900"
+                    >
+                      Bestaande map kiezen
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </Modal>
   );
 }
 
@@ -769,11 +1094,15 @@ function NoteFormModal({ customer, note, onClose, onSaved }: { customer: Custome
   const [visibleToCustomer, setVisibleToCustomer] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Attachment states
-  const [filePath, setFilePath] = useState<string | null>(null);
-  const [fileName, setFileName] = useState<string | null>(null);
-  const [fileSize, setFileSize] = useState<number | null>(null);
-  const [mimeType, setMimeType] = useState<string | null>(null);
+  // Multiple Attachments state
+  const [attachments, setAttachments] = useState<{
+    id?: string;
+    file_path: string;
+    file_name: string;
+    file_size: number;
+    mime_type: string;
+  }[]>([]);
+  
   const [uploading, setUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -783,10 +1112,21 @@ function NoteFormModal({ customer, note, onClose, onSaved }: { customer: Custome
     setTitle(note?.title ?? "");
     setBody(note?.body ?? "");
     setVisibleToCustomer(note?.visible_to_customer ?? false);
-    setFilePath(note?.file_path ?? null);
-    setFileName(note?.file_name ?? null);
-    setFileSize(note?.file_size ?? null);
-    setMimeType(note?.mime_type ?? null);
+    
+    // Load existing attachments
+    if (note?.attachments) {
+      setAttachments(note.attachments);
+    } else if (note?.file_path) {
+      // Legacy fallback
+      setAttachments([{
+        file_path: note.file_path,
+        file_name: note.file_name || "Bijlage",
+        file_size: note.file_size || 0,
+        mime_type: note.mime_type || "application/octet-stream"
+      }]);
+    } else {
+      setAttachments([]);
+    }
   }, [note]);
 
   const handleFileUpload = async (file: File) => {
@@ -799,10 +1139,15 @@ function NoteFormModal({ customer, note, onClose, onSaved }: { customer: Custome
       const formData = new FormData();
       formData.append("file", file);
       const res = await api.dossierUploadNoteAttachment(customer.id, formData);
-      setFilePath(res.filePath);
-      setFileName(res.fileName);
-      setFileSize(res.fileSize);
-      setMimeType(res.mimeType);
+      
+      const newAttachment = {
+        file_path: res.filePath,
+        file_name: res.fileName,
+        file_size: res.fileSize,
+        mime_type: res.mimeType
+      };
+      
+      setAttachments(prev => [...prev, newAttachment]);
       push("success", "Bestand succesvol geüpload.");
     } catch {
       push("error", "Uploaden van bestand mislukt.");
@@ -823,18 +1168,27 @@ function NoteFormModal({ customer, note, onClose, onSaved }: { customer: Custome
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileUpload(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      // Handle all files
+      Array.from(e.dataTransfer.files).forEach(file => handleFileUpload(file));
     }
   };
 
   const handleSave = async () => {
     setSaving(true);
     try {
+      // Convert to format API expects (mapping both for safety)
+      const apiAttachments = attachments.map(a => ({
+        filePath: a.file_path,
+        fileName: a.file_name,
+        fileSize: a.file_size,
+        mimeType: a.mime_type
+      }));
+
       if (note) {
-        await api.dossierUpdateNote(note.id, title, body, visibleToCustomer, filePath, fileName, fileSize, mimeType);
+        await api.dossierUpdateNote(note.id, title, body, undefined, undefined, undefined, undefined, visibleToCustomer, apiAttachments);
       } else {
-        await api.dossierSaveNote(customer.id, title, body, visibleToCustomer, filePath, fileName, fileSize, mimeType);
+        await api.dossierSaveNote(customer.id, title, body, undefined, undefined, undefined, undefined, visibleToCustomer, apiAttachments);
       }
       push("success", "Notitie opgeslagen.");
       onClose();
@@ -844,6 +1198,10 @@ function NoteFormModal({ customer, note, onClose, onSaved }: { customer: Custome
     } finally {
       setSaving(false);
     }
+  };
+
+  const removeAttachment = (index: number) => {
+    setAttachments(prev => prev.filter((_, i) => i !== index));
   };
 
   return (
@@ -856,60 +1214,63 @@ function NoteFormModal({ customer, note, onClose, onSaved }: { customer: Custome
         
         {/* Attachment Upload Area */}
         <div>
-          <label className="block text-sm font-medium text-ink-700 mb-1.5">Bijlage toevoegen (optioneel)</label>
-          {filePath ? (
-            <div className="flex items-center justify-between p-3 border border-brand-200 bg-brand-50 rounded-xl text-sm">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <Paperclip className="h-4 w-4 text-brand-600 flex-shrink-0" />
-                <div className="truncate">
-                  <p className="font-medium text-ink-800 truncate">{fileName}</p>
-                  {fileSize && <p className="text-xs text-ink-400">{formatBytes(fileSize)}</p>}
+          <label className="block text-sm font-medium text-ink-700 mb-1.5">Bijlagen</label>
+          
+          <div className="space-y-2 mb-3">
+            {attachments.map((att, idx) => (
+              <div key={att.id || idx} className="flex items-center justify-between p-3 border border-brand-200 bg-brand-50 rounded-xl text-sm">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Paperclip className="h-4 w-4 text-brand-600 flex-shrink-0" />
+                  <div className="truncate">
+                    <p className="font-medium text-ink-800 truncate">{att.file_name}</p>
+                    <p className="text-xs text-ink-400">{formatBytes(att.file_size)}</p>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(idx)}
+                  className="p-1 text-ink-400 hover:text-danger-600 transition-colors"
+                  title="Bijlage verwijderen"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setFilePath(null);
-                  setFileName(null);
-                  setFileSize(null);
-                  setMimeType(null);
-                }}
-                className="p-1 text-ink-400 hover:text-danger-600 transition-colors"
-                title="Bijlage verwijderen"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          ) : (
-            <div
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
-              className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-all flex flex-col items-center justify-center ${
-                isDragOver ? "border-brand-500 bg-brand-50/20" : "border-ink-200 hover:border-brand-500 hover:bg-ink-50/50"
-              }`}
-            >
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])}
-                className="hidden"
-              />
-              {uploading ? (
-                <div className="flex flex-col items-center py-2">
-                  <Spinner className="h-6 w-6 text-brand-600 mb-2" />
-                  <p className="text-xs font-medium text-ink-600">Bezig met uploaden...</p>
-                </div>
-              ) : (
-                <>
-                  <Paperclip className="h-6 w-6 text-ink-400 mb-2" />
-                  <p className="text-xs font-semibold text-ink-700">Sleep bestand hierheen of klik om te selecteren</p>
-                  <p className="text-[10px] text-ink-400 mt-1">Maximale bestandsgrootte: 50MB</p>
-                </>
-              )}
-            </div>
-          )}
+            ))}
+          </div>
+
+          <div
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-all flex flex-col items-center justify-center ${
+              isDragOver ? "border-brand-500 bg-brand-50/20" : "border-ink-200 hover:border-brand-500 hover:bg-ink-50/50"
+            }`}
+          >
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={(e) => {
+                if (e.target.files) {
+                  Array.from(e.target.files).forEach(file => handleFileUpload(file));
+                }
+              }}
+              multiple
+              className="hidden"
+            />
+            {uploading ? (
+              <div className="flex flex-col items-center py-2">
+                <Spinner className="h-6 w-6 text-brand-600 mb-2" />
+                <p className="text-xs font-medium text-ink-600">Bezig met uploaden...</p>
+              </div>
+            ) : (
+              <>
+                <FilePlus className="h-6 w-6 text-ink-400 mb-2" />
+                <p className="text-xs font-semibold text-ink-700">Sleep bestanden hierheen of klik om toe te voegen</p>
+                <p className="text-[10px] text-ink-400 mt-1">Maximale bestandsgrootte: 50MB</p>
+              </>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
@@ -934,14 +1295,16 @@ function CommunicationTab({ customer }: { customer: CustomerRow }) {
   const [comms, setComms] = useState<Communication[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editingComm, setEditingComm] = useState<Communication | null>(null);
   const [showLiveChat, setShowLiveChat] = useState(false);
   const [viewer, setViewer] = useState<Communication | null>(null);
+  const [sendingId, setSendingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api.dossierCommunications(customer.id);
-      setComms(res.communications);
+      setComms(res.communications || []);
     } catch {
       push("error", "Communicatie kon niet worden geladen.");
     } finally {
@@ -950,6 +1313,36 @@ function CommunicationTab({ customer }: { customer: CustomerRow }) {
   }, [customer.id, push]);
 
   useEffect(() => { load(); }, [load]);
+
+  const handleDirectSendDraft = async (comm: Communication) => {
+    setSendingId(comm.id);
+    try {
+      await api.dossierSendDraftCommunication(customer.id, comm.id);
+      push("success", "Concept succesvol per e-mail verzonden naar de klant.");
+      if (viewer?.id === comm.id) {
+        setViewer(null);
+      }
+      load();
+    } catch (err) {
+      push("error", err instanceof Error ? err.message : "Verzenden van concept mislukt.");
+    } finally {
+      setSendingId(null);
+    }
+  };
+
+  const handleDeleteComm = async (commId: string) => {
+    if (!window.confirm("Weet u zeker dat u dit concept wilt verwijderen?")) return;
+    try {
+      await api.dossierDeleteCommunication(customer.id, commId);
+      push("success", "Bericht/concept verwijderd.");
+      if (viewer?.id === commId) {
+        setViewer(null);
+      }
+      load();
+    } catch (err) {
+      push("error", err instanceof Error ? err.message : "Verwijderen mislukt.");
+    }
+  };
 
   if (showLiveChat) {
     return (
@@ -974,7 +1367,13 @@ function CommunicationTab({ customer }: { customer: CustomerRow }) {
         <button onClick={() => setShowLiveChat(true)} className="btn-secondary flex items-center gap-1.5 text-sm">
           <Send className="h-4 w-4 text-ink-500" /> Open Live Chat
         </button>
-        <button onClick={() => setShowForm(true)} className="btn-primary flex items-center gap-1.5 text-sm">
+        <button
+          onClick={() => {
+            setEditingComm(null);
+            setShowForm(true);
+          }}
+          className="btn-primary flex items-center gap-1.5 text-sm"
+        >
           <Mail className="h-4 w-4" /> E-mail versturen
         </button>
       </div>
@@ -993,20 +1392,88 @@ function CommunicationTab({ customer }: { customer: CustomerRow }) {
                 <th className="px-4 py-3">Onderwerp</th>
                 <th className="px-4 py-3">Ontvanger</th>
                 <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3 text-right">Acties</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-ink-100">
               {comms.map((c) => {
                 const d = new Date(c.sent_at);
+                const isDraft = c.status === "draft";
+                const isSending = sendingId === c.id;
+                const hasAttachments = c.attachments && c.attachments.length > 0;
+
                 return (
-                  <tr key={c.id} className="hover:bg-ink-50/50 transition-colors cursor-pointer" onClick={() => setViewer(c)}>
+                  <tr
+                    key={c.id}
+                    className="hover:bg-ink-50/50 transition-colors cursor-pointer"
+                    onClick={() => setViewer(c)}
+                  >
                     <td className="px-4 py-3 text-ink-700">{d.toLocaleDateString("nl-NL", { day: "2-digit", month: "short", year: "numeric" })}</td>
                     <td className="px-4 py-3 text-ink-500 tabular-nums">{d.toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" })}</td>
                     <td className="px-4 py-3 text-ink-500">{c.quarter && c.year ? `${c.quarter} ${c.year}` : "—"}</td>
-                    <td className="px-4 py-3 font-medium text-ink-900">{c.subject}</td>
+                    <td className="px-4 py-3 font-medium text-ink-900">
+                      <div className="flex items-center gap-1.5">
+                        <span>{c.subject}</span>
+                        {hasAttachments && (
+                          <span
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-ink-100 text-[11px] text-ink-600 font-normal"
+                            title={`${c.attachments!.length} ${c.attachments!.length === 1 ? "bijlage" : "bijlagen"}`}
+                          >
+                            <Paperclip className="h-3 w-3" />
+                            {c.attachments!.length}
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-ink-600">{c.recipient}</td>
                     <td className="px-4 py-3">
-                      {c.status === "sent" ? <span className="badge-active">Verzonden</span> : <span className="badge-neutral">Concept</span>}
+                      {isDraft ? (
+                        <span className="badge-neutral">Concept</span>
+                      ) : (
+                        <span className="badge-active">Verzonden</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-end gap-1.5">
+                        {isDraft ? (
+                          <>
+                            <button
+                              onClick={() => handleDirectSendDraft(c)}
+                              disabled={isSending}
+                              className="btn-primary py-1 px-2.5 text-xs flex items-center gap-1"
+                              title="Concept nu versturen per e-mail"
+                            >
+                              {isSending ? <Spinner className="h-3 w-3" /> : <Send className="h-3 w-3" />}
+                              <span>Versturen</span>
+                            </button>
+                            <button
+                              onClick={() => {
+                                setEditingComm(c);
+                                setShowForm(true);
+                              }}
+                              className="btn-secondary py-1 px-2 text-xs flex items-center gap-1"
+                              title="Concept bewerken"
+                            >
+                              <Edit3 className="h-3.5 w-3.5 text-ink-600" />
+                              <span>Bewerken</span>
+                            </button>
+                            <button
+                              onClick={() => handleDeleteComm(c.id)}
+                              className="btn-ghost py-1 px-1.5 text-xs text-rose-500 hover:text-rose-700 hover:bg-rose-50"
+                              title="Concept verwijderen"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => setViewer(c)}
+                            className="btn-secondary py-1 px-2 text-xs text-ink-600"
+                          >
+                            Bekijken
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -1015,47 +1482,332 @@ function CommunicationTab({ customer }: { customer: CustomerRow }) {
           </table>
         </div>
       )}
-      {showForm && <CommunicationFormModal customer={customer} onClose={() => setShowForm(false)} onSaved={load} />}
-      <CommunicationViewerModal comm={viewer} onClose={() => setViewer(null)} />
+      {showForm && (
+        <CommunicationFormModal
+          customer={customer}
+          initialComm={editingComm}
+          onClose={() => {
+            setShowForm(false);
+            setEditingComm(null);
+          }}
+          onSaved={() => {
+            setShowForm(false);
+            setEditingComm(null);
+            load();
+          }}
+        />
+      )}
+      <CommunicationViewerModal
+        comm={viewer}
+        onClose={() => setViewer(null)}
+        onEdit={(c) => {
+          setViewer(null);
+          setEditingComm(c);
+          setShowForm(true);
+        }}
+        onSend={(c) => handleDirectSendDraft(c)}
+        onDelete={(cId) => handleDeleteComm(cId)}
+        sending={Boolean(viewer && sendingId === viewer.id)}
+      />
     </div>
   );
 }
 
-function CommunicationViewerModal({ comm, onClose }: { comm: Communication | null; onClose: () => void }) {
+function CommunicationViewerModal({
+  comm,
+  onClose,
+  onEdit,
+  onSend,
+  onDelete,
+  sending = false,
+}: {
+  comm: Communication | null;
+  onClose: () => void;
+  onEdit?: (comm: Communication) => void;
+  onSend?: (comm: Communication) => void;
+  onDelete?: (commId: string) => void;
+  sending?: boolean;
+}) {
+  const { push } = useToast();
+  const [attachmentUrls, setAttachmentUrls] = useState<Record<string, string>>({});
+  const [loadingUrls, setLoadingUrls] = useState(false);
+
+  useEffect(() => {
+    if (!comm || !comm.attachments || comm.attachments.length === 0) {
+      setAttachmentUrls({});
+      return;
+    }
+
+    let isMounted = true;
+    setLoadingUrls(true);
+
+    const loadUrls = async () => {
+      const urls: Record<string, string> = {};
+      for (const att of comm.attachments || []) {
+        try {
+          const res = await api.dossierCommunicationAttachmentView(att.file_path);
+          if (res?.url) {
+            urls[att.file_path] = res.url;
+          }
+        } catch (err) {
+          console.error("Failed to load attachment url:", err);
+        }
+      }
+      if (isMounted) {
+        setAttachmentUrls(urls);
+        setLoadingUrls(false);
+      }
+    };
+
+    loadUrls();
+    return () => {
+      isMounted = false;
+    };
+  }, [comm]);
+
   if (!comm) return null;
   const d = new Date(comm.sent_at);
+  const isDraft = comm.status === "draft";
+  const attachments = comm.attachments || [];
+
+  const handleOpenAttachment = async (att: CommunicationAttachment) => {
+    try {
+      let url = attachmentUrls[att.file_path];
+      if (!url) {
+        const res = await api.dossierCommunicationAttachmentView(att.file_path);
+        url = res.url;
+      }
+      if (url) {
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+    } catch {
+      push("error", "Kan bijlage niet openen.");
+    }
+  };
+
   return (
-    <Modal open={!!comm} onClose={onClose} title={comm.subject} size="md"
-      footer={<button onClick={onClose} className="btn-secondary">Sluiten</button>}
-    >
-      <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          <div><p className="text-xs text-ink-400">Datum</p><p className="font-medium text-ink-800">{d.toLocaleString("nl-NL", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p></div>
-          <div><p className="text-xs text-ink-400">Ontvanger</p><p className="font-medium text-ink-800">{comm.recipient}</p></div>
+    <Modal
+      open={!!comm}
+      onClose={onClose}
+      title={comm.subject}
+      size="lg"
+      footer={
+        <div className="flex w-full items-center justify-between">
+          <div>
+            {isDraft && onDelete && (
+              <button
+                onClick={() => onDelete(comm.id)}
+                disabled={sending}
+                className="btn-ghost text-rose-600 hover:bg-rose-50 text-xs flex items-center gap-1 px-2.5 py-1.5"
+              >
+                <Trash2 className="h-3.5 w-3.5" /> Concept verwijderen
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className="btn-secondary">
+              Sluiten
+            </button>
+            {isDraft && onEdit && (
+              <button
+                onClick={() => onEdit(comm)}
+                disabled={sending}
+                className="btn-secondary flex items-center gap-1.5"
+              >
+                <Edit3 className="h-4 w-4 text-ink-600" /> Bewerken
+              </button>
+            )}
+            {isDraft && onSend && (
+              <button
+                onClick={() => onSend(comm)}
+                disabled={sending}
+                className="btn-primary flex items-center gap-1.5"
+              >
+                {sending ? <Spinner className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+                Concept versturen
+              </button>
+            )}
+          </div>
         </div>
+      }
+    >
+      <div className="space-y-4">
+        <div className="flex items-center justify-between border-b border-ink-100 pb-3">
+          <div className="grid grid-cols-2 gap-4 text-sm flex-1">
+            <div>
+              <p className="text-xs text-ink-400">Datum</p>
+              <p className="font-medium text-ink-800">
+                {d.toLocaleString("nl-NL", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-ink-400">Ontvanger</p>
+              <p className="font-medium text-ink-800">{comm.recipient}</p>
+            </div>
+          </div>
+          <div>
+            {isDraft ? (
+              <span className="badge-neutral text-xs">Concept</span>
+            ) : (
+              <span className="badge-active text-xs">Verzonden</span>
+            )}
+          </div>
+        </div>
+
         <div>
           <p className="text-xs font-medium text-ink-500 mb-1.5">Bericht</p>
           <div className="rounded-lg border border-ink-200 bg-ink-50/50 p-4 text-sm text-ink-700 whitespace-pre-wrap min-h-[100px]">
             {comm.body || "(geen berichtinhoud)"}
           </div>
         </div>
+
+        {attachments.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-ink-500 flex items-center gap-1.5">
+              <Paperclip className="h-3.5 w-3.5" />
+              Bijlagen en afbeeldingen ({attachments.length})
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {attachments.map((att, idx) => {
+                const isImg = att.mime_type?.startsWith("image/") || /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(att.file_name);
+                const signedUrl = attachmentUrls[att.file_path];
+
+                return (
+                  <div
+                    key={idx}
+                    className="flex flex-col rounded-lg border border-ink-200 bg-white p-2.5 hover:border-brand-300 transition-colors shadow-xs"
+                  >
+                    {isImg && signedUrl && (
+                      <div
+                        onClick={() => handleOpenAttachment(att)}
+                        className="w-full h-32 mb-2 rounded bg-ink-100 overflow-hidden cursor-pointer flex items-center justify-center border border-ink-150"
+                      >
+                        <img
+                          src={signedUrl}
+                          alt={att.file_name}
+                          className="max-h-full max-w-full object-contain hover:scale-105 transition-transform"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        {isImg ? (
+                          <ImageIcon className="h-4 w-4 text-brand-600 flex-shrink-0" />
+                        ) : (
+                          <FileText className="h-4 w-4 text-ink-500 flex-shrink-0" />
+                        )}
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-ink-800 truncate" title={att.file_name}>
+                            {att.file_name}
+                          </p>
+                          <p className="text-[10px] text-ink-400">
+                            {formatBytes(att.file_size)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenAttachment(att)}
+                          className="p-1 rounded text-ink-500 hover:text-ink-900 hover:bg-ink-100 text-xs"
+                          title="Openen"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </Modal>
   );
 }
 
-function CommunicationFormModal({ customer, onClose, onSaved }: { customer: CustomerRow; onClose: () => void; onSaved: () => void }) {
+function CommunicationFormModal({
+  customer,
+  initialComm,
+  onClose,
+  onSaved,
+}: {
+  customer: CustomerRow;
+  initialComm?: Communication | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const { push } = useToast();
-  const [subject, setSubject] = useState("");
-  const [body, setBody] = useState("");
-  const [quarter, setQuarter] = useState<string>("");
-  const [year, setYear] = useState<string>("");
+  const [subject, setSubject] = useState(initialComm?.subject || "");
+  const [body, setBody] = useState(initialComm?.body || "");
+  const [quarter, setQuarter] = useState<string>(initialComm?.quarter || "");
+  const [year, setYear] = useState<string>(initialComm?.year ? String(initialComm.year) : "");
+  const [attachments, setAttachments] = useState<CommunicationAttachment[]>(initialComm?.attachments || []);
+  const [uploadingFiles, setUploadingFiles] = useState(false);
   const [saving, setSaving] = useState(false);
   const [customerEmail, setCustomerEmail] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    api.dossierProfile(customer.id).then((res) => setCustomerEmail(res.profile.email ?? "")).catch(() => setCustomerEmail(""));
+    api
+      .dossierProfile(customer.id)
+      .then((res) => setCustomerEmail(res.profile.email ?? ""))
+      .catch(() => setCustomerEmail(""));
   }, [customer.id]);
+
+  const processUploadFiles = async (files: FileList | File[]) => {
+    if (!files || files.length === 0) return;
+    setUploadingFiles(true);
+    const newAttachments: CommunicationAttachment[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const formData = new FormData();
+      formData.append("file", file);
+      try {
+        const uploaded = await api.dossierUploadCommunicationAttachment(customer.id, formData);
+        newAttachments.push({
+          file_path: uploaded.filePath,
+          file_name: uploaded.fileName,
+          file_size: uploaded.fileSize,
+          mime_type: uploaded.mimeType,
+        });
+      } catch (err) {
+        console.error("Upload error:", err);
+        push("error", `Uploaden van ${file.name} mislukt.`);
+      }
+    }
+
+    if (newAttachments.length > 0) {
+      setAttachments((prev) => [...prev, ...newAttachments]);
+      push("success", `${newAttachments.length} ${newAttachments.length === 1 ? "afbeelding/bestand" : "afbeeldingen/bestanden"} toegevoegd.`);
+    }
+    setUploadingFiles(false);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      processUploadFiles(e.target.files);
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processUploadFiles(e.dataTransfer.files);
+    }
+  };
+
+  const handleRemoveAttachment = (idxToRemove: number) => {
+    setAttachments((prev) => prev.filter((_, idx) => idx !== idxToRemove));
+  };
 
   const handleSave = async (asDraft: boolean) => {
     if (!subject.trim()) {
@@ -1069,13 +1821,18 @@ function CommunicationFormModal({ customer, onClose, onSaved }: { customer: Cust
     setSaving(true);
     try {
       const res = await api.dossierLogCommunication(customer.id, {
-        subject: subject.trim(), body: body.trim(),
-        quarter: quarter || null, year: year ? Number(year) : null, status: asDraft ? "draft" : "sent",
+        id: initialComm?.id,
+        subject: subject.trim(),
+        body: body.trim(),
+        quarter: quarter || null,
+        year: year ? Number(year) : null,
+        status: asDraft ? "draft" : "sent",
+        attachments,
       });
       if (res.warning) {
         push("warning", res.warning);
       } else {
-        push("success", asDraft ? "Bericht opgeslagen als concept." : "E-mail verzonden.");
+        push("success", asDraft ? "Bericht opgeslagen als concept." : "E-mail succesvol verzonden.");
       }
       onClose();
       onSaved();
@@ -1086,18 +1843,32 @@ function CommunicationFormModal({ customer, onClose, onSaved }: { customer: Cust
     }
   };
 
-  const emailInfo = customerEmail
-    ? <>Wordt verzonden naar: <span className="font-medium text-ink-800">{customerEmail}</span></>
-    : <span className="text-warning-700">Deze klant heeft geen e-mailadres ingevuld — verzenden slaat het bericht op als concept.</span>;
+  const emailInfo = customerEmail ? (
+    <>
+      Wordt verzonden naar: <span className="font-medium text-ink-800">{customerEmail}</span>
+    </>
+  ) : (
+    <span className="text-warning-700">Deze klant heeft geen e-mailadres ingevuld — verzenden slaat het bericht op als concept.</span>
+  );
+
+  const modalTitle = initialComm ? "Concept bewerken & versturen" : "E-mail opstellen & versturen";
 
   return (
-    <Modal open={true} onClose={onClose} title="E-mail versturen" size="md"
+    <Modal
+      open={true}
+      onClose={onClose}
+      title={modalTitle}
+      size="lg"
       footer={
         <>
-          <button onClick={onClose} className="btn-secondary">Annuleren</button>
-          <button onClick={() => handleSave(true)} disabled={saving} className="btn-secondary">Opslaan als concept</button>
-          <button onClick={() => handleSave(false)} disabled={saving} className="btn-primary">
-            {saving ? <Spinner /> : <Mail className="h-4 w-4" />} Versturen
+          <button onClick={onClose} className="btn-secondary">
+            Annuleren
+          </button>
+          <button onClick={() => handleSave(true)} disabled={saving || uploadingFiles} className="btn-secondary">
+            {initialComm ? "Concept bijwerken" : "Opslaan als concept"}
+          </button>
+          <button onClick={() => handleSave(false)} disabled={saving || uploadingFiles} className="btn-primary">
+            {saving ? <Spinner /> : <Mail className="h-4 w-4" />} Direct versturen
           </button>
         </>
       }
@@ -1106,13 +1877,153 @@ function CommunicationFormModal({ customer, onClose, onSaved }: { customer: Cust
         <div className="rounded-lg bg-ink-50 px-3 py-2.5 text-xs text-ink-500 flex items-center gap-1.5">
           <Mail className="h-3.5 w-3.5 flex-shrink-0" /> {emailInfo}
         </div>
-        <div><label className="block text-sm font-medium text-ink-700 mb-1.5">Onderwerp</label><input type="text" value={subject} onChange={(e) => setSubject(e.target.value)} className="input" /></div>
-        <div><label className="block text-sm font-medium text-ink-700 mb-1.5">Bericht</label><textarea value={body} onChange={(e) => setBody(e.target.value)} className="input min-h-[160px]" placeholder="Type hier het bericht aan de klant..." /></div>
-        <div className="grid grid-cols-2 gap-4">
-          <div><label className="block text-sm font-medium text-ink-700 mb-1.5">Kwartaal (optioneel)</label><select value={quarter} onChange={(e) => setQuarter(e.target.value)} className="input"><option value="">—</option>{QUARTERS.map((q) => <option key={q} value={q}>{q}</option>)}</select></div>
-          <div><label className="block text-sm font-medium text-ink-700 mb-1.5">Jaar (optioneel)</label><input type="number" value={year} onChange={(e) => setYear(e.target.value)} className="input tabular-nums" /></div>
+        <div>
+          <label className="block text-sm font-medium text-ink-700 mb-1.5">Onderwerp</label>
+          <input
+            type="text"
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+            className="input"
+            placeholder="Bijv. Aanlevering kwartaalstukken Q1"
+          />
         </div>
-        <p className="text-xs text-ink-400">De e-mail wordt verzonden vanaf safevaultcheck@gmail.com. Als de klant geen e-mailadres heeft ingevuld, wordt het bericht opgeslagen als concept en wordt er niets verzonden.</p>
+        <div>
+          <label className="block text-sm font-medium text-ink-700 mb-1.5">Bericht</label>
+          <textarea
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            className="input min-h-[140px]"
+            placeholder="Type hier het bericht aan de klant..."
+          />
+        </div>
+
+        {/* Attachment & Image Upload Section */}
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="block text-sm font-medium text-ink-700">
+              Afbeeldingen &amp; Bijlagen
+            </label>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadingFiles}
+              className="text-xs text-brand-600 hover:text-brand-700 font-medium flex items-center gap-1"
+            >
+              <ImageIcon className="h-3.5 w-3.5" />
+              <span>Afbeelding/bestand toevoegen</span>
+            </button>
+          </div>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.zip"
+            onChange={handleFileChange}
+            className="hidden"
+          />
+
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDragging(true);
+            }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            className={`cursor-pointer rounded-lg border-2 border-dashed p-3.5 text-center transition-colors ${
+              isDragging
+                ? "border-brand-500 bg-brand-50/50"
+                : "border-ink-200 bg-ink-50/40 hover:bg-ink-50 hover:border-ink-300"
+            }`}
+          >
+            {uploadingFiles ? (
+              <div className="flex items-center justify-center gap-2 py-1 text-xs text-ink-600">
+                <Spinner className="h-4 w-4" />
+                <span>Bestanden uploaden...</span>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center gap-1 text-xs text-ink-500">
+                <div className="flex items-center gap-2 text-ink-700 font-medium">
+                  <UploadCloud className="h-4 w-4 text-brand-600" />
+                  <span>Sleep afbeeldingen hierheen of klik om te selecteren</span>
+                </div>
+                <p className="text-[11px] text-ink-400">
+                  Ondersteunt JPG, PNG, GIF, WebP, PDF en documenten. Afbeeldingen worden automatisch ingesloten in de e-mail.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Attachments List */}
+          {attachments.length > 0 && (
+            <div className="mt-2.5 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {attachments.map((att, idx) => {
+                const isImg = att.mime_type?.startsWith("image/") || /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(att.file_name);
+                return (
+                  <div
+                    key={idx}
+                    className="flex items-center justify-between rounded-lg border border-ink-200 bg-white px-2.5 py-2 text-xs shadow-2xs"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      {isImg ? (
+                        <ImageIcon className="h-4 w-4 text-brand-600 flex-shrink-0" />
+                      ) : (
+                        <Paperclip className="h-4 w-4 text-ink-500 flex-shrink-0" />
+                      )}
+                      <div className="min-w-0">
+                        <p className="font-medium text-ink-800 truncate" title={att.file_name}>
+                          {att.file_name}
+                        </p>
+                        <p className="text-[10px] text-ink-400">
+                          {formatBytes(att.file_size)}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRemoveAttachment(idx);
+                      }}
+                      className="p-1 rounded text-ink-400 hover:text-rose-600 hover:bg-rose-50 flex-shrink-0 ml-2"
+                      title="Verwijderen"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-ink-700 mb-1.5">Kwartaal (optioneel)</label>
+            <select value={quarter} onChange={(e) => setQuarter(e.target.value)} className="input">
+              <option value="">—</option>
+              {QUARTERS.map((q) => (
+                <option key={q} value={q}>
+                  {q}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-ink-700 mb-1.5">Jaar (optioneel)</label>
+            <input
+              type="number"
+              value={year}
+              onChange={(e) => setYear(e.target.value)}
+              className="input tabular-nums"
+              placeholder={String(new Date().getFullYear())}
+            />
+          </div>
+        </div>
+        <p className="text-xs text-ink-400">
+          De e-mail wordt verzonden via uw geconfigureerde SafeVault e-mailservice met het officiële SafeVault logo en meegestuurde afbeeldingen/bijlagen.
+        </p>
       </div>
     </Modal>
   );

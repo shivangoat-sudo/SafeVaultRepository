@@ -1,0 +1,22 @@
+◇ injected env (0) from .env // tip: ⌘ override existing { override: true }
+Supabase service role key is set.
+◇ injected env (0) from .env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+Query succeeded! Number of rows: 1
+Columns present in returned row: [
+  'id',
+  'customer_id',
+  'user_id',
+  'title',
+  'body',
+  'created_at',
+  'updated_at'
+]
+Row data: {
+  id: '2e774082-6f5d-4762-af97-ed2943b0e722',
+  customer_id: '9abf2b40-7840-444b-921f-82b05b07449a',
+  user_id: 'c2d1bb26-e751-4281-a3ce-9409622f2c2a',
+  title: 'note',
+  body: 'note',
+  created_at: '2026-08-21T13:02:22.346479+00:00',
+  updated_at: '2026-08-21T13:02:40.504+00:00'
+}

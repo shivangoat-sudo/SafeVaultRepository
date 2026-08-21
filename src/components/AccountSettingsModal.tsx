@@ -41,7 +41,7 @@ export function AccountSettingsModal({
     setSavingName(true);
     try {
       await api.changeName(newName.trim());
-      push("success", "Naam gewijzigd.");
+      push("success", "Naamswijziging gelukt. Vernieuw de pagina om uw nieuwe naam overal te zien.");
       setNewName("");
       onClose();
     } catch (err) {

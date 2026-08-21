@@ -247,10 +247,10 @@ export function LoginPage() {
             <Feature icon={Shield} text="Slimme btw-verwerking voor financiële documenten" bold />
             <Feature icon={Lock} text="Veilige documentuitwisseling zonder e-mail" bold />
             <Feature icon={User} text="Elke boekhouder en klant werkt uitsluitend met zijn eigen dossiers" bold />
-            <Feature icon={Lock} text="Zero Trust-architectuur met server-side autorisatie" />
-            <Feature icon={Shield} text="Bestanden nooit openbaar toegankelijk" />
-            <Feature icon={Shield} text="Automatische btw-verwerking volgens Nederlandse btw-regels" />
-            <Feature icon={User} text="Volledige scheiding tussen gebruikers en klantdossiers" />
+            <Feature icon={Lock} text="Zero Trust-architectuur met server-side autorisatie" bold />
+            <Feature icon={Shield} text="Bestanden nooit openbaar toegankelijk" bold />
+            <Feature icon={Shield} text="Automatische btw-verwerking volgens Nederlandse btw-regels" bold />
+            <Feature icon={User} text="Volledige scheiding tussen boekhouders en klantdossiers" bold />
           </div>
         </div>
         <div className="relative text-xs text-ink-400 space-y-1">

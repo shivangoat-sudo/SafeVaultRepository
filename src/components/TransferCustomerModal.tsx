@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Modal } from "@/components/Modal";
 import { Spinner } from "@/components/ui";
 import { useToast } from "@/components/Toast";
+import { useAuth } from "@/auth";
 import { api } from "@/api";
 import { ArrowRightLeft, UserCheck, AlertTriangle } from "lucide-react";
 
@@ -12,12 +13,15 @@ interface TransferCustomerModalProps {
 }
 
 export function TransferCustomerModal({ customer, onClose, onTransferred }: TransferCustomerModalProps) {
+  const { account } = useAuth();
   const { push } = useToast();
   const [users, setUsers] = useState<Array<{ id: string; name: string; number: string; role: string }>>([]);
   const [selectedUserId, setSelectedUserId] = useState<string>("");
   const [loadingUsers, setLoadingUsers] = useState<boolean>(false);
   const [transferring, setTransferring] = useState<boolean>(false);
   const [confirming, setConfirming] = useState<boolean>(false);
+
+  const isStandalone = account?.role === "user" && !account?.is_org_user;
 
   useEffect(() => {
     if (customer) {
@@ -73,6 +77,14 @@ export function TransferCustomerModal({ customer, onClose, onTransferred }: Tran
           <div className="flex items-center justify-center py-8">
             <Spinner className="h-5 w-5 text-ink-400" />
             <span className="ml-2 text-xs text-ink-500">Bevoegde gebruikers ophalen...</span>
+          </div>
+        ) : isStandalone ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800 flex items-start gap-2.5">
+            <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-amber-900">Geen overdrachtsrechten</p>
+              <p className="mt-0.5">Als losse gebruiker/boekhouder zonder organisatie bent u niet bevoegd om klanten over te dragen.</p>
+            </div>
           </div>
         ) : users.length === 0 ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800 flex items-start gap-2.5">

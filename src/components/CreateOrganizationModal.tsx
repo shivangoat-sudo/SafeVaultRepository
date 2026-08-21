@@ -65,7 +65,7 @@ function generateCustomerNumber(usedNumbers: Set<string>): string {
   let attempts = 0;
   while (attempts < 1000) {
     let num = "6";
-    for (let i = 0; i < 7; i++) {
+    while (num.length < 8) {
       num += getRandomDigit().toString();
     }
     if (!usedNumbers.has(num)) {
@@ -74,7 +74,11 @@ function generateCustomerNumber(usedNumbers: Set<string>): string {
     }
     attempts++;
   }
-  return "6" + Math.floor(1000000 + Math.random() * 9000000).toString();
+  let fallback = "6";
+  while (fallback.length < 8) {
+    fallback += getRandomDigit().toString();
+  }
+  return fallback;
 }
 
 function generateSecurePassword(): string {

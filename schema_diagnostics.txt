@@ -1,0 +1,88 @@
+◇ injected env (0) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+Exposed Tables/Views:
+- invoices
+- btw_geleerde_regels
+- archive_folders
+- sessions
+- file_metadata
+- btw_analysis_items
+- notifications
+- ledger_entries
+- accounts
+- customers
+- credentials
+- btw_analysis_runs
+- settings
+- archive_notes
+- user_notes
+- customer_profile_fields
+- transactions
+- files
+- suppliers
+- archive_files
+- access_logs
+- admin_status
+- btw_calculations
+- vat_returns
+- invoice_lines
+- communications
+- btw_adjustments
+- companies
+
+Table Schema: accounts
+  - id: string (uuid) [REQUIRED] Note:
+This is a Primary Key.<pk/>
+  - number: string (text) [REQUIRED] 
+  - name: string (text) [REQUIRED] 
+  - role: string (text) [REQUIRED] 
+  - status: string (text) [REQUIRED] 
+  - failed_attempts: integer (integer) [REQUIRED] 
+  - owner_id: string (uuid) [OPTIONAL] Note:
+This is a Foreign Key to `accounts.id`.<fk table='accounts' column='id'/>
+  - storage_used_bytes: integer (bigint) [REQUIRED] 
+  - last_login_at: string (timestamp with time zone) [OPTIONAL] 
+  - created_at: string (timestamp with time zone) [REQUIRED] 
+  - updated_at: string (timestamp with time zone) [REQUIRED] 
+
+Table Schema: credentials
+  - account_id: string (uuid) [REQUIRED] Note:
+This is a Primary Key.<pk/>
+This is a Foreign Key to `accounts.id`.<fk table='accounts' column='id'/>
+  - password_hash: string (text) [REQUIRED] 
+  - temp_password: string (text) [OPTIONAL] 
+  - must_reset_password: boolean (boolean) [REQUIRED] 
+  - updated_at: string (timestamp with time zone) [REQUIRED] 
+
+Table Schema: notes - NOT EXPOSED OR NOT FOUND
+
+Table Schema: user_notes
+  - id: string (uuid) [REQUIRED] Note:
+This is a Primary Key.<pk/>
+  - customer_id: string (uuid) [REQUIRED] Note:
+This is a Foreign Key to `accounts.id`.<fk table='accounts' column='id'/>
+  - user_id: string (uuid) [REQUIRED] Note:
+This is a Foreign Key to `accounts.id`.<fk table='accounts' column='id'/>
+  - title: string (text) [REQUIRED] 
+  - body: string (text) [REQUIRED] 
+  - created_at: string (timestamp with time zone) [REQUIRED] 
+  - updated_at: string (timestamp with time zone) [REQUIRED] 
+
+Table Schema: files
+  - id: string (uuid) [REQUIRED] Note:
+This is a Primary Key.<pk/>
+  - customer_id: string (uuid) [REQUIRED] Note:
+This is a Foreign Key to `accounts.id`.<fk table='accounts' column='id'/>
+  - user_id: string (uuid) [REQUIRED] Note:
+This is a Foreign Key to `accounts.id`.<fk table='accounts' column='id'/>
+  - original_name: string (text) [REQUIRED] 
+  - mime_type: string (text) [REQUIRED] 
+  - size_bytes: integer (bigint) [REQUIRED] 
+  - storage_path: string (text) [REQUIRED] 
+  - upload_name_input: string (text) [OPTIONAL] 
+  - upload_number_input: string (text) [OPTIONAL] 
+  - expires_at: string (timestamp with time zone) [REQUIRED] 
+  - purge_notified: boolean (boolean) [REQUIRED] 
+  - created_at: string (timestamp with time zone) [REQUIRED] 
+  - category: string (character varying) [OPTIONAL] 
+  - quarter: string (character varying) [OPTIONAL] 
+  - year: integer (integer) [OPTIONAL] 

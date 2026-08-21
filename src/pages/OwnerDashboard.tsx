@@ -7,12 +7,12 @@ import { DashboardShell, NotificationBell } from "@/components/DashboardShell";
 import { Modal } from "@/components/Modal";
 import { AccountSettingsModal } from "@/components/AccountSettingsModal";
 import { StatCard, formatBytes, formatDate, formatDateTime, Spinner, EmptyState, PageHeader } from "@/components/ui";
-import type { OwnerStats, OwnerUser, WarningLog, BlockedAccount, SettingsData, Notification, SecurityWarning } from "@/types";
+import type { OwnerStats, OwnerOrganization, OwnerUser, WarningLog, BlockedAccount, SettingsData, Notification, SecurityWarning } from "@/types";
 import {
   LayoutDashboard, Users, AlertTriangle, ScrollText, Settings as SettingsIcon,
   UserPlus, Lock, ShieldCheck, ShieldAlert, HardDrive, FileText, Ban, Unlock, Copy,
   CheckCircle2, AlertTriangle as TriangleAlert, BarChart3, Download, Trash2,
-  Building2, Search, User, X,
+  Building2, Search, User, X, RefreshCw,
 } from "lucide-react";
 
 type Tab = "overview" | "organizations" | "users" | "customers" | "warnings" | "blocked" | "logs" | "settings";
@@ -21,8 +21,21 @@ export function OwnerDashboard() {
   const { account } = useAuth();
   const [tab, setTab] = useState<Tab>("overview");
   const [stats, setStats] = useState<OwnerStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsError, setStatsError] = useState<string | null>(null);
+
+  const [organizations, setOrganizations] = useState<OwnerOrganization[]>([]);
+  const [orgsLoading, setOrgsLoading] = useState(true);
+  const [orgsError, setOrgsError] = useState<string | null>(null);
+
   const [users, setUsers] = useState<OwnerUser[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
+  const [usersError, setUsersError] = useState<string | null>(null);
+
   const [customers, setCustomers] = useState<CustomerItem[]>([]);
+  const [customersLoading, setCustomersLoading] = useState(true);
+  const [customersError, setCustomersError] = useState<string | null>(null);
+
   const [warnings, setWarnings] = useState<WarningLog[]>([]);
   const [blocked, setBlocked] = useState<BlockedAccount[]>([]);
   const [logs, setLogs] = useState<WarningLog[]>([]);
@@ -39,14 +52,23 @@ export function OwnerDashboard() {
   const [showSecurityWarning, setShowSecurityWarning] = useState(false);
 
   const [selectedOrgFilter, setSelectedOrgFilter] = useState<string | null>(null);
-  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
-    setFetchError(null);
+    setStatsLoading(true);
+    setOrgsLoading(true);
+    setUsersLoading(true);
+    setCustomersLoading(true);
+
+    setStatsError(null);
+    setOrgsError(null);
+    setUsersError(null);
+    setCustomersError(null);
+
     try {
-      const [s, u, custRes, w, b, l, st, n] = await Promise.all([
+      const [sRes, orgRes, uRes, custRes, wRes, bRes, lRes, stRes, nRes] = await Promise.allSettled([
         api.ownerStats(),
+        api.ownerOrganizations(),
         api.ownerUsers(),
         api.ownerCustomers(),
         api.ownerWarnings(),
@@ -56,40 +78,86 @@ export function OwnerDashboard() {
         api.notifications(),
       ]);
 
-      const usersList = u?.users || [];
-      const customersList = custRes?.customers || [];
-      const warningsList = w?.warnings || [];
-      const blockedList = b?.blocked || [];
-      const logsList = l?.logs || [];
-      const notifsList = n?.notifications || [];
+      // Organizations
+      if (orgRes.status === "fulfilled") {
+        setOrganizations(orgRes.value.organizations || []);
+        setOrgsError(null);
+      } else {
+        const msg = orgRes.reason instanceof Error ? orgRes.reason.message : "Fout bij laden van organisaties.";
+        console.error("OwnerDashboard loadOrganizations error:", orgRes.reason);
+        setOrgsError(msg);
+      }
+      setOrgsLoading(false);
 
-      setStats(s || {
-        userCount: usersList.filter((u: OwnerUser) => String(u.number).startsWith("89")).length,
-        organizationCount: usersList.filter((u: OwnerUser) => String(u.number).startsWith("2")).length,
-        customerCount: customersList.length,
-        blockedCount: blockedList.length,
-        totalStorageBytes: 0,
-        fileCount: 0,
-        users: usersList
-      });
+      // Users
+      if (uRes.status === "fulfilled") {
+        setUsers(uRes.value.users || []);
+        setUsersError(null);
+      } else {
+        const msg = uRes.reason instanceof Error ? uRes.reason.message : "Fout bij laden van gebruikers.";
+        console.error("OwnerDashboard loadUsers error:", uRes.reason);
+        setUsersError(msg);
+      }
+      setUsersLoading(false);
 
-      setUsers(usersList);
-      setCustomers(customersList);
-      setWarnings(warningsList);
-      setBlocked(blockedList);
-      setLogs(logsList);
-      setSettings(st);
+      // Customers
+      if (custRes.status === "fulfilled") {
+        setCustomers(custRes.value.customers || []);
+        setCustomersError(null);
+      } else {
+        const msg = custRes.reason instanceof Error ? custRes.reason.message : "Fout bij laden van klanten.";
+        console.error("OwnerDashboard loadCustomers error:", custRes.reason);
+        setCustomersError(msg);
+      }
+      setCustomersLoading(false);
 
-      setNotifications(notifsList);
-      setSecurityWarning(n?.securityWarning || null);
+      // Stats
+      if (sRes.status === "fulfilled") {
+        setStats(sRes.value);
+        setStatsError(null);
+      } else {
+        const msg = sRes.reason instanceof Error ? sRes.reason.message : "Fout bij laden van statistieken.";
+        console.error("OwnerDashboard loadStats error:", sRes.reason);
+        setStatsError(msg);
+      }
+      setStatsLoading(false);
 
-      if (n?.securityWarning && !sessionStorage.getItem("sw_shown")) {
-        setShowSecurityWarning(true);
-        sessionStorage.setItem("sw_shown", "1");
+      // Warnings
+      if (wRes.status === "fulfilled") {
+        setWarnings(wRes.value.warnings || []);
+      }
+      // Blocked
+      if (bRes.status === "fulfilled") {
+        setBlocked(bRes.value.blocked || []);
+      }
+      // Logs
+      if (lRes.status === "fulfilled") {
+        setLogs(lRes.value.logs || []);
+      }
+      // Settings
+      if (stRes.status === "fulfilled") {
+        setSettings(stRes.value);
+      } else {
+        setSettings({
+          id: 1,
+          max_customer_accounts_per_batch: 50,
+          max_upload_bytes: 52428800,
+          session_lifetime_hours: 5,
+          max_login_attempts: 5,
+          retention_years: 7,
+        });
+      }
+      // Notifications
+      if (nRes.status === "fulfilled") {
+        setNotifications(nRes.value.notifications || []);
+        setSecurityWarning(nRes.value.securityWarning || null);
+        if (nRes.value.securityWarning && !sessionStorage.getItem("sw_shown")) {
+          setShowSecurityWarning(true);
+          sessionStorage.setItem("sw_shown", "1");
+        }
       }
     } catch (err) {
-      console.error("OwnerDashboard loadAll error:", err);
-      setFetchError(err instanceof Error ? err.message : "Fout bij laden van gegevens.");
+      console.error("OwnerDashboard loadAll unexpected error:", err);
     } finally {
       setLoading(false);
     }
@@ -123,27 +191,34 @@ export function OwnerDashboard() {
         </>
       }
     >
-      {fetchError && (
-        <div className="mb-4 p-4 rounded-lg bg-danger-50 border border-danger-200 text-danger-800 text-sm flex items-center justify-between gap-4">
-          <div>
-            <p className="font-semibold">Kon gegevens niet laden van de server</p>
-            <p className="text-xs text-danger-700 mt-0.5">{fetchError}</p>
-          </div>
-          <button onClick={loadAll} className="btn-secondary text-xs shrink-0">
-            Opnieuw proberen
-          </button>
-        </div>
-      )}
-      {loading && !stats ? (
+      {loading && !stats && organizations.length === 0 && users.length === 0 ? (
         <div className="flex justify-center py-20"><Spinner className="h-6 w-6 text-ink-400" /></div>
       ) : (
         <>
-          {tab === "overview" && stats && (
-            <OwnerOverview stats={stats} warnings={warnings} settings={settings} onTab={setTab} />
+          {tab === "overview" && (
+            <OwnerOverview
+              stats={stats || {
+                userCount: users.length,
+                organizationCount: organizations.length,
+                customerCount: customers.length,
+                blockedCount: blocked.length,
+                totalStorageBytes: 0,
+                fileCount: 0,
+              }}
+              loading={statsLoading}
+              error={statsError}
+              onRetry={loadAll}
+              warnings={warnings}
+              settings={settings}
+              onTab={setTab}
+            />
           )}
           {tab === "organizations" && (
             <OwnerOrganizationsTab
-              users={users}
+              organizations={organizations}
+              loading={orgsLoading}
+              error={orgsError}
+              onRetry={loadAll}
               onCreateOrg={() => setShowCreateOrg(true)}
               onSelectOrgUsers={(orgId) => {
                 setSelectedOrgFilter(orgId);
@@ -156,6 +231,10 @@ export function OwnerDashboard() {
           {tab === "users" && (
             <OwnerUsersTab
               users={users}
+              organizations={organizations}
+              loading={usersLoading}
+              error={usersError}
+              onRetry={loadAll}
               selectedOrgId={selectedOrgFilter}
               onClearOrgFilter={() => setSelectedOrgFilter(null)}
               onCreateUser={() => setShowCreateUser(true)}
@@ -169,6 +248,9 @@ export function OwnerDashboard() {
           {tab === "customers" && (
             <OwnerCustomersTab
               customers={customers}
+              loading={customersLoading}
+              error={customersError}
+              onRetry={loadAll}
               onRefresh={loadAll}
               onBack={() => setTab("overview")}
             />
@@ -197,8 +279,11 @@ export function OwnerDashboard() {
 }
 
 // ===== Overview =====
-function OwnerOverview({ stats, warnings, settings, onTab }: {
+function OwnerOverview({ stats, loading, error, onRetry, warnings, settings, onTab }: {
   stats: OwnerStats;
+  loading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
   warnings: WarningLog[];
   settings: SettingsData | null;
   onTab: (t: Tab) => void;
@@ -210,6 +295,21 @@ function OwnerOverview({ stats, warnings, settings, onTab }: {
         title="Overzicht"
         subtitle="Platformstatus en statistieken"
       />
+
+      {error && (
+        <div className="rounded-lg bg-danger-50 border border-danger-200 p-4 text-danger-800 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <AlertTriangle className="h-4 w-4 text-danger-600 flex-shrink-0" />
+            <span>{error}</span>
+          </div>
+          {onRetry && (
+            <button onClick={onRetry} className="btn-secondary text-xs py-1 px-3">
+              <RefreshCw className="h-3.5 w-3.5 mr-1" /> Opnieuw proberen
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <StatCard label="Organisaties" value={String(stats.organizationCount || 0)} icon={Building2} tone="brand" onClick={() => onTab("organizations")} />
         <StatCard label="Gebruikers" value={String(stats.userCount)} icon={Users} tone="brand" onClick={() => onTab("users")} />
@@ -244,10 +344,10 @@ function OwnerOverview({ stats, warnings, settings, onTab }: {
           <div className="space-y-3">
             <StatusRow label="Systeem" value="Operationeel" ok />
             <StatusRow label="Beveiliging" value="Actief" ok />
-            <StatusRow label="Bewaartermijn" value={settings ? `${settings.retention_years} jaar` : "Laden..."} />
-            <StatusRow label="Max. upload" value={settings ? formatBytes(settings.max_upload_bytes) : "Laden..."} />
-            <StatusRow label="Sessie-duur" value={settings ? `${settings.session_lifetime_hours} uur` : "Laden..."} />
-            <StatusRow label="Max. loginpogingen" value={settings ? String(settings.max_login_attempts) : "Laden..."} />
+            <StatusRow label="Bewaartermijn" value={`${settings?.retention_years ?? 2} jaar`} />
+            <StatusRow label="Max. upload" value={formatBytes(settings?.max_upload_bytes ?? 52428800)} />
+            <StatusRow label="Sessie-duur" value={`${settings?.session_lifetime_hours ?? 12} uur`} />
+            <StatusRow label="Max. loginpogingen" value={String(settings?.max_login_attempts ?? 5)} />
           </div>
         </div>
       </div>
@@ -267,7 +367,7 @@ function StatusRow({ label, value, ok }: { label: string; value: string; ok?: bo
   );
 }
 
-function WarningRow({ w }: { w: WarningLog }) {
+function WarningRow({ w, onResolve, busy }: { w: WarningLog; onResolve?: () => void; busy?: boolean }) {
   const isBlock = w.event === "account_blocked" || w.event === "customer_blocked";
   const label = w.event === "account_blocked" ? "Account geblokkeerd"
     : w.event === "customer_blocked" ? "Klant geblokkeerd"
@@ -275,7 +375,7 @@ function WarningRow({ w }: { w: WarningLog }) {
     : w.event === "owner_unblock" ? "Account gedeblokkeerd"
     : w.event;
   return (
-    <div className="flex items-center justify-between py-2 border-b border-ink-100 last:border-0">
+    <div className="flex items-center justify-between py-3 px-5 hover:bg-ink-50/50 transition-colors border-b border-ink-100 last:border-0">
       <div className="flex items-center gap-3 min-w-0">
         <span className={`flex h-8 w-8 items-center justify-center rounded-lg flex-shrink-0 ${isBlock ? "bg-danger-50 text-danger-600" : "bg-warning-50 text-warning-600"}`}>
           {isBlock ? <Ban className="h-4 w-4" /> : <TriangleAlert className="h-4 w-4" />}
@@ -285,7 +385,14 @@ function WarningRow({ w }: { w: WarningLog }) {
           <p className="text-xs text-ink-400 truncate">Nr. {w.account_number} · {w.ip}</p>
         </div>
       </div>
-      <span className="text-xs text-ink-400 flex-shrink-0">{formatDateTime(w.created_at)}</span>
+      <div className="flex items-center gap-4 flex-shrink-0">
+        <span className="text-xs text-ink-400">{formatDateTime(w.created_at)}</span>
+        {onResolve && (
+          <button onClick={onResolve} disabled={busy} className="btn-ghost text-xs py-1 px-2 text-brand-600 hover:text-brand-700" title="Markeren als opgelost">
+            {busy ? <Spinner /> : <CheckCircle2 className="h-3.5 w-3.5" />} Oplossen
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -305,10 +412,16 @@ interface CustomerItem {
 // ===== Customers tab =====
 function OwnerCustomersTab({
   customers,
+  loading,
+  error,
+  onRetry,
   onRefresh,
   onBack,
 }: {
   customers: CustomerItem[];
+  loading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
   onRefresh: () => void;
   onBack: () => void;
 }) {
@@ -332,11 +445,9 @@ function OwnerCustomersTab({
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
-    const pwd = window.prompt("Vul uw wachtwoord in ter bevestiging van de verwijdering:");
-    if (!pwd) return;
     setDeleting(true);
     try {
-      await api.ownerDeleteUser(deleteTarget.id, pwd);
+      await api.ownerDeleteUser(deleteTarget.id);
       push("success", `Klant ${deleteTarget.name} is verwijderd.`);
       setDeleteTarget(null);
       onRefresh();
@@ -408,14 +519,36 @@ function OwnerCustomersTab({
         </div>
       </div>
 
-      <div className="card overflow-hidden">
-        {filtered.length === 0 ? (
+      {/* Customers Table */}
+      {error ? (
+        <div className="card p-8 text-center space-y-4">
+          <div className="inline-flex p-3 rounded-full bg-danger-50 text-danger-600">
+            <AlertTriangle className="h-8 w-8" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-base font-semibold text-ink-900">Fout bij laden van klanten</h3>
+            <p className="text-sm text-ink-500 max-w-md mx-auto">{error}</p>
+          </div>
+          {onRetry && (
+            <button onClick={onRetry} className="btn-secondary inline-flex items-center">
+              <RefreshCw className="h-4 w-4 mr-2" /> Opnieuw proberen
+            </button>
+          )}
+        </div>
+      ) : loading ? (
+        <div className="card p-12 flex justify-center items-center">
+          <Spinner className="h-8 w-8 text-brand-600" />
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="card overflow-hidden">
           <EmptyState
             icon={UserPlus}
             title="Geen klanten gevonden"
             subtitle={search ? "Geen klanten voldoen aan de zoekopdracht." : "Er zijn nog geen klanten in het systeem."}
           />
-        ) : (
+        </div>
+      ) : (
+        <div className="card overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -465,8 +598,8 @@ function OwnerCustomersTab({
               </tbody>
             </table>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       <ResetPasswordModal user={resetTarget} onClose={() => setResetTarget(null)} />
       <ConfirmUnblockModal name={unblockTarget?.name ?? null} onCancel={() => setUnblockTarget(null)} onConfirm={handleUnblock} />
@@ -474,16 +607,21 @@ function OwnerCustomersTab({
     </div>
   );
 }
-
 // ===== Organizations tab =====
 function OwnerOrganizationsTab({
-  users,
+  organizations,
+  loading,
+  error,
+  onRetry,
   onCreateOrg,
   onSelectOrgUsers,
   onRefresh,
   onBack,
 }: {
-  users: OwnerUser[];
+  organizations: OwnerOrganization[];
+  loading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
   onCreateOrg: () => void;
   onSelectOrgUsers: (orgId: string) => void;
   onRefresh: () => void;
@@ -492,17 +630,14 @@ function OwnerOrganizationsTab({
   const { push } = useToast();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "blocked">("all");
-  const [resetTarget, setResetTarget] = useState<OwnerUser | null>(null);
-  const [reset2faTarget, setReset2faTarget] = useState<OwnerUser | null>(null);
+  const [resetTarget, setResetTarget] = useState<OwnerOrganization | null>(null);
+  const [reset2faTarget, setReset2faTarget] = useState<OwnerOrganization | null>(null);
   const [resetting2fa, setResetting2fa] = useState(false);
-  const [unblockTarget, setUnblockTarget] = useState<OwnerUser | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<OwnerUser | null>(null);
+  const [unblockTarget, setUnblockTarget] = useState<OwnerOrganization | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<OwnerOrganization | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // Filter accounts starting with '2' (Organizations)
-  const orgs = users.filter((u) => String(u.number).startsWith("2"));
-
-  const filteredOrgs = orgs.filter((o) => {
+  const filteredOrgs = organizations.filter((o) => {
     const matchesSearch =
       o.name.toLowerCase().includes(search.toLowerCase()) ||
       String(o.number).includes(search);
@@ -513,11 +648,9 @@ function OwnerOrganizationsTab({
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
-    const pwd = window.prompt("Vul uw wachtwoord in ter bevestiging van de verwijdering:");
-    if (!pwd) return;
     setDeleting(true);
     try {
-      await api.ownerDeleteUser(deleteTarget.id, pwd);
+      await api.ownerDeleteUser(deleteTarget.id);
       push("success", `Organisatie ${deleteTarget.name} is verwijderd.`);
       setDeleteTarget(null);
       onRefresh();
@@ -589,7 +722,7 @@ function OwnerOrganizationsTab({
               statusFilter === "all" ? "bg-ink-200 text-ink-900" : "bg-ink-50 text-ink-600 hover:bg-ink-100"
             }`}
           >
-            Alle ({orgs.length})
+            Alle ({organizations.length})
           </button>
           <button
             onClick={() => setStatusFilter("active")}
@@ -597,7 +730,7 @@ function OwnerOrganizationsTab({
               statusFilter === "active" ? "bg-emerald-100 text-emerald-800" : "bg-ink-50 text-ink-600 hover:bg-ink-100"
             }`}
           >
-            Actief ({orgs.filter((o) => o.status === "active").length})
+            Actief ({organizations.filter((o) => o.status === "active").length})
           </button>
           <button
             onClick={() => setStatusFilter("blocked")}
@@ -605,19 +738,40 @@ function OwnerOrganizationsTab({
               statusFilter === "blocked" ? "bg-red-100 text-red-800" : "bg-ink-50 text-ink-600 hover:bg-ink-100"
             }`}
           >
-            Geblokkeerd ({orgs.filter((o) => o.status === "blocked").length})
+            Geblokkeerd ({organizations.filter((o) => o.status === "blocked").length})
           </button>
         </div>
       </div>
 
-      <div className="card overflow-hidden">
-        {filteredOrgs.length === 0 ? (
+      {error ? (
+        <div className="card p-8 text-center space-y-4">
+          <div className="inline-flex p-3 rounded-full bg-danger-50 text-danger-600">
+            <AlertTriangle className="h-8 w-8" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-base font-semibold text-ink-900">Fout bij laden van organisaties</h3>
+            <p className="text-sm text-ink-500 max-w-md mx-auto">{error}</p>
+          </div>
+          {onRetry && (
+            <button onClick={onRetry} className="btn-secondary inline-flex items-center">
+              <RefreshCw className="h-4 w-4 mr-2" /> Opnieuw proberen
+            </button>
+          )}
+        </div>
+      ) : loading ? (
+        <div className="card p-12 flex justify-center items-center">
+          <Spinner className="h-8 w-8 text-brand-600" />
+        </div>
+      ) : filteredOrgs.length === 0 ? (
+        <div className="card overflow-hidden">
           <EmptyState
             icon={Building2}
             title="Geen organisaties gevonden"
             subtitle={search ? "Geen organisaties voldoen aan de zoekopdracht." : "Maak de eerste organisatie aan."}
           />
-        ) : (
+        </div>
+      ) : (
+        <div className="card overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -697,8 +851,8 @@ function OwnerOrganizationsTab({
               </tbody>
             </table>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       <ResetPasswordModal user={resetTarget} onClose={() => setResetTarget(null)} />
       <ConfirmReset2FaModal user={reset2faTarget} resetting={resetting2fa} onCancel={() => setReset2faTarget(null)} onConfirm={handleReset2fa} />
@@ -711,6 +865,10 @@ function OwnerOrganizationsTab({
 // ===== Users tab =====
 function OwnerUsersTab({
   users,
+  organizations,
+  loading,
+  error,
+  onRetry,
   selectedOrgId,
   onClearOrgFilter,
   onCreateUser,
@@ -721,6 +879,10 @@ function OwnerUsersTab({
   onBack,
 }: {
   users: OwnerUser[];
+  organizations: OwnerOrganization[];
+  loading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
   selectedOrgId?: string | null;
   onClearOrgFilter?: () => void;
   onCreateUser: () => void;
@@ -748,11 +910,7 @@ function OwnerUsersTab({
     }
   }, [selectedOrgId]);
 
-  // Organizations list for dropdown
-  const orgList = users.filter((u) => String(u.number).startsWith("2"));
-
-  // Bookkeeper users (number starting with 89)
-  const bookkeepers = users.filter((u) => String(u.number).startsWith("89"));
+  const bookkeepers = users;
 
   const filteredUsers = bookkeepers.filter((u) => {
     const matchesSearch =
@@ -760,7 +918,7 @@ function OwnerUsersTab({
       String(u.number).includes(search) ||
       (u.organizationName && u.organizationName.toLowerCase().includes(search.toLowerCase()));
 
-    const isOrgUser = Boolean(u.organizationName || (u.owner_id && orgList.some((o) => o.id === u.owner_id)));
+    const isOrgUser = Boolean(u.organizationName || (u.owner_id && organizations.some((o) => o.id === u.owner_id)));
 
     let matchesType = true;
     if (userTypeFilter === "in_org") matchesType = isOrgUser;
@@ -776,11 +934,9 @@ function OwnerUsersTab({
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
-    const pwd = window.prompt("Vul uw wachtwoord in ter bevestiging van de verwijdering:");
-    if (!pwd) return;
     setDeleting(true);
     try {
-      await api.ownerDeleteUser(deleteTarget.id, pwd);
+      await api.ownerDeleteUser(deleteTarget.id);
       push("success", `${deleteTarget.name} is verwijderd.`);
       setDeleteTarget(null);
       onRefresh();
@@ -818,7 +974,7 @@ function OwnerUsersTab({
     }
   };
 
-  const selectedOrgName = orgList.find((o) => o.id === activeOrgFilter)?.name;
+  const selectedOrgName = organizations.find((o) => o.id === activeOrgFilter)?.name;
 
   return (
     <div className="space-y-6">
@@ -862,7 +1018,7 @@ function OwnerUsersTab({
               className="input py-1.5 text-xs max-w-[220px]"
             >
               <option value="all">Alle organisaties</option>
-              {orgList.map((o) => (
+              {organizations.map((o) => (
                 <option key={o.id} value={o.id}>
                   {o.name} ({o.number})
                 </option>
@@ -889,7 +1045,7 @@ function OwnerUsersTab({
                 userTypeFilter === "in_org" ? "bg-white text-purple-700 shadow-sm" : "text-ink-600 hover:text-ink-900"
               }`}
             >
-              🏢 Van organisatie ({bookkeepers.filter((u) => Boolean(u.organizationName || (u.owner_id && orgList.some((o) => o.id === u.owner_id)))).length})
+              🏢 Van organisatie ({bookkeepers.filter((u) => Boolean(u.organizationName || (u.owner_id && organizations.some((o) => o.id === u.owner_id)))).length})
             </button>
             <button
               onClick={() => setUserTypeFilter("loose")}
@@ -897,7 +1053,7 @@ function OwnerUsersTab({
                 userTypeFilter === "loose" ? "bg-white text-ink-800 shadow-sm" : "text-ink-600 hover:text-ink-900"
               }`}
             >
-              👤 Gewoon los ({bookkeepers.filter((u) => !u.organizationName && (!u.owner_id || !orgList.some((o) => o.id === u.owner_id))).length})
+              👤 Gewoon los ({bookkeepers.filter((u) => !u.organizationName && (!u.owner_id || !organizations.some((o) => o.id === u.owner_id))).length})
             </button>
           </div>
 
@@ -921,8 +1077,27 @@ function OwnerUsersTab({
       </div>
 
       {/* Users Table */}
-      <div className="card overflow-hidden">
-        {filteredUsers.length === 0 ? (
+      {error ? (
+        <div className="card p-8 text-center space-y-4">
+          <div className="inline-flex p-3 rounded-full bg-danger-50 text-danger-600">
+            <AlertTriangle className="h-8 w-8" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-base font-semibold text-ink-900">Fout bij laden van gebruikers</h3>
+            <p className="text-sm text-ink-500 max-w-md mx-auto">{error}</p>
+          </div>
+          {onRetry && (
+            <button onClick={onRetry} className="btn-secondary inline-flex items-center">
+              <RefreshCw className="h-4 w-4 mr-2" /> Opnieuw proberen
+            </button>
+          )}
+        </div>
+      ) : loading ? (
+        <div className="card p-12 flex justify-center items-center">
+          <Spinner className="h-8 w-8 text-brand-600" />
+        </div>
+      ) : filteredUsers.length === 0 ? (
+        <div className="card overflow-hidden">
           <EmptyState
             icon={Users}
             title="Geen gebruikers gevonden"
@@ -932,7 +1107,9 @@ function OwnerUsersTab({
                 : "Maak de eerste gebruiker aan."
             }
           />
-        ) : (
+        </div>
+      ) : (
+        <div className="card overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -950,7 +1127,7 @@ function OwnerUsersTab({
               </thead>
               <tbody className="divide-y divide-ink-100">
                 {filteredUsers.map((u) => {
-                  const orgName = u.organizationName || orgList.find((o) => o.id === u.owner_id)?.name;
+                  const orgName = u.organizationName || organizations.find((o) => o.id === u.owner_id)?.name;
                   return (
                     <tr key={u.id} className="hover:bg-ink-50/50 transition-colors">
                       <td className="px-5 py-3 font-medium text-ink-900">
@@ -1020,8 +1197,8 @@ function OwnerUsersTab({
               </tbody>
             </table>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       <ResetPasswordModal user={resetTarget} onClose={() => setResetTarget(null)} />
       <ConfirmReset2FaModal user={reset2faTarget} resetting={resetting2fa} onCancel={() => setReset2faTarget(null)} onConfirm={handleReset2fa} />
@@ -1031,7 +1208,7 @@ function OwnerUsersTab({
   );
 }
 
-function ConfirmReset2FaModal({ user, resetting, onCancel, onConfirm }: { user: OwnerUser | null; resetting: boolean; onCancel: () => void; onConfirm: () => void }) {
+function ConfirmReset2FaModal({ user, resetting, onCancel, onConfirm }: { user: { id: string; name: string } | null; resetting: boolean; onCancel: () => void; onConfirm: () => void }) {
   return (
     <Modal open={!!user} onClose={onCancel} title="2FA Resetten" size="sm"
       footer={
@@ -1057,17 +1234,53 @@ function ConfirmReset2FaModal({ user, resetting, onCancel, onConfirm }: { user: 
 
 // ===== Warnings tab =====
 function OwnerWarningsTab({ warnings, onRefresh, onBack }: { warnings: WarningLog[]; onRefresh: () => void; onBack: () => void }) {
+  const { push } = useToast();
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
+  const [resolvingAll, setResolvingAll] = useState(false);
+
+  const handleResolve = async (id: string) => {
+    setResolvingId(id);
+    try {
+      await api.ownerResolveWarning(id);
+      onRefresh();
+    } catch (err) {
+      push("error", "Kon waarschuwing niet oplossen.");
+    } finally {
+      setResolvingId(null);
+    }
+  };
+
+  const handleResolveAll = async () => {
+    setResolvingAll(true);
+    try {
+      await api.ownerResolveAllWarnings();
+      onRefresh();
+      push("success", "Alle waarschuwingen zijn opgelost.");
+    } catch (err) {
+      push("error", "Kon waarschuwingen niet oplossen.");
+    } finally {
+      setResolvingAll(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <PageHeader title="Waarschuwingen" subtitle="Beveiligingsincidenten van de afgelopen 30 dagen" onBack={onBack} action={
-        <button onClick={onRefresh} className="btn-secondary"><BarChart3 className="h-4 w-4" /> Vernieuwen</button>
+      <PageHeader title="Waarschuwingen" subtitle="Onopgeloste beveiligingsincidenten" onBack={onBack} action={
+        <div className="flex items-center gap-2">
+          {warnings.length > 0 && (
+            <button onClick={handleResolveAll} disabled={resolvingAll} className="btn-secondary">
+              {resolvingAll ? <Spinner /> : <CheckCircle2 className="h-4 w-4" />} Alles oplossen
+            </button>
+          )}
+          <button onClick={onRefresh} className="btn-secondary"><BarChart3 className="h-4 w-4" /> Vernieuwen</button>
+        </div>
       } />
       <div className="card overflow-hidden">
         {warnings.length === 0 ? (
-          <EmptyState icon={ShieldCheck} title="Geen waarschuwingen" subtitle="Geen beveiligingsincidenten in de afgelopen 30 dagen." />
+          <EmptyState icon={ShieldCheck} title="Geen waarschuwingen" subtitle="Er zijn momenteel geen onopgeloste beveiligingsincidenten." />
         ) : (
           <div className="divide-y divide-ink-100">
-            {warnings.map((w) => <WarningRow key={w.id} w={w} />)}
+            {warnings.map((w) => <WarningRow key={w.id} w={w} onResolve={() => handleResolve(w.id)} busy={resolvingId === w.id} />)}
           </div>
         )}
       </div>
@@ -1845,29 +2058,49 @@ function ResetPasswordModal({ user, onClose }: { user: { id: string; name: strin
   );
 }
 
-function ConfirmDeleteModal({ user, deleting, onCancel, onConfirm }: { user: { id: string; name: string; number: string } | null; deleting: boolean; onCancel: () => void; onConfirm: () => void }) {
+function ConfirmDeleteModal({
+  user,
+  deleting,
+  onCancel,
+  onConfirm,
+}: {
+  user: { id: string; name: string; number: string } | null;
+  deleting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
   return (
-    <Modal open={!!user} onClose={onCancel} title="Gebruiker verwijderen" size="sm"
+    <Modal
+      open={!!user}
+      onClose={onCancel}
+      title="Account / Gebruiker verwijderen"
+      size="sm"
       footer={
         <>
-          <button onClick={onCancel} className="btn-secondary" disabled={deleting}>Annuleren</button>
-          <button onClick={onConfirm} disabled={deleting} className="btn-danger">
+          <button onClick={onCancel} className="btn-secondary" disabled={deleting}>
+            Annuleren
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={deleting}
+            className="btn-danger"
+          >
             {deleting ? <Spinner /> : <Trash2 className="h-4 w-4" />} Verwijderen
           </button>
         </>
       }
     >
-      <div className="space-y-3">
+      <div className="space-y-4">
         <div className="flex items-start gap-3">
           <span className="flex h-10 w-10 items-center justify-center rounded-full bg-danger-50 text-danger-600 flex-shrink-0">
             <TriangleAlert className="h-5 w-5" />
           </span>
           <p className="text-sm text-ink-600">
-            Weet u zeker dat u <span className="font-medium text-ink-800">{user?.name}</span> (nr. {user?.number}) wilt verwijderen?
+            Weet u zeker dat u <span className="font-semibold text-ink-900">{user?.name}</span> (nr. {user?.number}) wilt verwijderen?
           </p>
         </div>
         <div className="rounded-lg border border-danger-200 bg-danger-50/50 p-3 text-xs text-danger-700">
-          Alle gekoppelde klantaccounts, geüploade bestanden, inlogsessies en meldingen worden permanent verwijderd. Deze actie kan niet ongedaan worden gemaakt.
+          Alle gekoppelde klantaccounts, bestanden, inlogsessies en gegevens worden permanent verwijderd. Deze actie kan niet ongedaan worden gemaakt.
         </div>
       </div>
     </Modal>

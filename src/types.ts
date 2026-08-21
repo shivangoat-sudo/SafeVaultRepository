@@ -6,6 +6,8 @@ export type AuthAccount = {
   name: string;
   role: Role;
   status: "active" | "blocked";
+  owner_id?: string | null;
+  is_org_user?: boolean;
 };
 
 export type LoginResponse = {
@@ -43,11 +45,28 @@ export type OwnerStats = {
   }[];
 };
 
+export type OwnerOrganization = {
+  id: string;
+  number: string;
+  name: string;
+  status: "active" | "blocked";
+  role: "organization";
+  owner_id?: string | null;
+  userCount: number;
+  customerCount: number;
+  storageBytes: number;
+  twoFactorEnabled?: boolean;
+  last2faVerifiedAt?: string | null;
+  createdAt: string;
+  lastLoginAt: string | null;
+};
+
 export type OwnerUser = {
   id: string;
   number: string;
   name: string;
   status: "active" | "blocked";
+  role?: "user" | "organization";
   storageBytes: number;
   customerCount: number;
   createdAt: string;
@@ -176,17 +195,37 @@ export type BtwCalculation = {
   created_at: string;
 };
 
+export type UserNoteAttachment = {
+  id: string;
+  file_path: string;
+  file_name: string;
+  file_size: number;
+  mime_type: string;
+};
+
 export type UserNote = {
   id: string;
+  customer_id: string;
+  user_id: string;
   title: string;
   body: string;
-  visible_to_customer: boolean;
+  visible_to_customer?: boolean;
+  archive_folder_id?: string | null;
+  // Keep legacy fields for compatibility during migration
   file_path?: string | null;
   file_name?: string | null;
   file_size?: number | null;
   mime_type?: string | null;
+  attachments?: UserNoteAttachment[];
   created_at: string;
   updated_at: string;
+};
+
+export type CommunicationAttachment = {
+  file_path: string;
+  file_name: string;
+  file_size: number;
+  mime_type: string;
 };
 
 export type Communication = {
@@ -200,6 +239,7 @@ export type Communication = {
   body: string;
   sender_id?: string;
   customer_id?: string;
+  attachments?: CommunicationAttachment[];
 };
 
 export type AdminStatusRow = {

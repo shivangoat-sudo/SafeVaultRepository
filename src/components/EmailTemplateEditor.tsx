@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { api } from "@/api";
 import { useToast } from "@/components/Toast";
 import { Edit3, Save, Eye, HelpCircle, ArrowLeft, RotateCcw } from "lucide-react";
+import { SafeVaultIcon } from "@/components/SafeVaultLogo";
 
 export type EmailTemplate = {
   key: string;
@@ -15,21 +16,32 @@ const PLACEHOLDERS = [
   { key: "{{bedrijfsnaam}}", description: "Bedrijfsnaam (bijv. Acme B.V.)" },
   { key: "{{boekhouder_naam}}", description: "Naam van de ingelogde boekhouder" },
   { key: "{{kwartaal}}", description: "Geselecteerd kwartaal (bijv. Q1, Q2)" },
-  { key: "{{maand}}", description: "Uiterste inleverdatum (bijv. 15 april)" },
+  { key: "{{deadline}}", description: "Uiterste inleverdatum (bijv. 15 april)" },
+  { key: "{{maand}}", description: "Deadline maand (bijv. april)" },
   { key: "{{jaar}}", description: "Huidig jaartal (bijv. 2026)" },
   { key: "{{openstaand_bedrag}}", description: "Openstaand bedrag (bijv. € 0,00)" },
 ];
 
-const DEFAULT_SUBJECT = "Herinnering: aanleveren documenten {{kwartaal}} {{jaar}}";
+const DEFAULT_SUBJECT = "Herinnering – gegevens aanleveren voor {{kwartaal}}";
 const DEFAULT_BODY = `Beste {{klant_naam}},
 
-Dit is een vriendelijke herinnering om uw boekhoudkundige stukken voor {{kwartaal}} {{jaar}} aan te leveren. De uiterste inleverdatum is {{maand}}.
+Dit is een vriendelijke herinnering om uw gegevens voor {{kwartaal}} aan te leveren.
 
-Bedrijfsnaam: {{bedrijfsnaam}}
-Boekhouder: {{boekhouder_naam}}
+Wilt u alstublieft vóór {{deadline}} uw gegevens en relevante documenten voor dit kwartaal aanleveren? Op basis hiervan kan ik uw btw-aangifte voor {{kwartaal}} voorbereiden en tijdig verzorgen.
+
+U kunt uw gegevens en benodigde documenten eenvoudig via uw SafeVault-klantomgeving aanleveren. Controleer daarbij of alle relevante inkomsten, uitgaven en overige documenten van het betreffende kwartaal zijn toegevoegd.
+
+Heeft u de gegevens al aangeleverd? Dan kunt u deze herinnering als niet verzonden beschouwen.
+
+Mocht u vragen hebben over welke gegevens of documenten u moet aanleveren, neem dan gerust contact met mij op via de gebruikelijke weg of stuur een bericht via de chat in SafeVault.
+
+Alvast bedankt voor het tijdig aanleveren van uw gegevens.
 
 Met vriendelijke groet,
-{{boekhouder_naam}}`;
+
+{{boekhouder_naam}}
+SafeVault
+Uw beveiligde omgeving voor het aanleveren en verwerken van uw boekhoudgegevens`;
 
 type Props = {
   activeQuarter: string;
@@ -111,13 +123,24 @@ export function EmailTemplateEditor({ activeQuarter, activeMonthLabel, onBack, o
   const sampleBookkeeper = "SafeVault Boekhouder";
   const sampleYear = new Date().getFullYear().toString();
 
+  const quarterMonths: Record<string, string> = {
+    Q1: "april",
+    Q2: "juli",
+    Q3: "oktober",
+    Q4: "januari",
+  };
+  const normQ = (activeQuarter || "Q1").toUpperCase().trim();
+  const targetMonth = quarterMonths[normQ] || "april";
+  const deadlineStr = activeMonthLabel || `15 ${targetMonth}`;
+
   const previewSubject = subject
     .replace(/\{\{klant_naam\}\}/gi, sampleCustomerName)
     .replace(/\{\{klantnaam\}\}/gi, sampleCustomerName)
     .replace(/\{\{bedrijfsnaam\}\}/gi, sampleCompany)
     .replace(/\{\{boekhouder_naam\}\}/gi, sampleBookkeeper)
-    .replace(/\{\{kwartaal\}\}/gi, activeQuarter || "Q1")
-    .replace(/\{\{maand\}\}/gi, activeMonthLabel || "15 april")
+    .replace(/\{\{kwartaal\}\}/gi, normQ)
+    .replace(/\{\{maand\}\}/gi, targetMonth)
+    .replace(/\{\{deadline\}\}/gi, deadlineStr)
     .replace(/\{\{jaar\}\}/gi, sampleYear)
     .replace(/\{\{openstaand_bedrag\}\}/gi, "€ 0,00");
 
@@ -126,8 +149,9 @@ export function EmailTemplateEditor({ activeQuarter, activeMonthLabel, onBack, o
     .replace(/\{\{klantnaam\}\}/gi, sampleCustomerName)
     .replace(/\{\{bedrijfsnaam\}\}/gi, sampleCompany)
     .replace(/\{\{boekhouder_naam\}\}/gi, sampleBookkeeper)
-    .replace(/\{\{kwartaal\}\}/gi, activeQuarter || "Q1")
-    .replace(/\{\{maand\}\}/gi, activeMonthLabel || "15 april")
+    .replace(/\{\{kwartaal\}\}/gi, normQ)
+    .replace(/\{\{maand\}\}/gi, targetMonth)
+    .replace(/\{\{deadline\}\}/gi, deadlineStr)
     .replace(/\{\{jaar\}\}/gi, sampleYear)
     .replace(/\{\{openstaand_bedrag\}\}/gi, "€ 0,00");
 
@@ -265,8 +289,30 @@ export function EmailTemplateEditor({ activeQuarter, activeMonthLabel, onBack, o
                 <span className="text-ink-500 font-normal">Onderwerp:</span> {previewSubject}
               </p>
             </div>
-            <div className="text-sm text-ink-800 whitespace-pre-wrap leading-relaxed">
+
+            {/* Email Header Representation */}
+            <div className="flex items-center gap-3 pb-3 border-b-2 border-ink-900">
+              <SafeVaultIcon className="h-9 w-9 shrink-0" />
+              <div>
+                <span className="text-base font-bold text-ink-900 leading-tight block">SafeVault</span>
+                <span className="text-xs text-ink-500">Uw beveiligde klantomgeving</span>
+              </div>
+            </div>
+
+            <div className="text-sm text-ink-800 whitespace-pre-wrap leading-relaxed py-2">
               {previewBody}
+            </div>
+
+            {/* Email Footer Representation */}
+            <div className="pt-4 border-t border-ink-100 space-y-3 text-center">
+              <div className="rounded-lg border border-ink-200 bg-ink-50/70 p-3 text-center">
+                <p className="text-xs text-ink-600 leading-normal">
+                  <strong>Let op (no-reply):</strong> Dit is een automatisch verzonden e-mail vanuit een onbeheerd adres. Reacties op dit bericht worden niet gelezen of beantwoord. Neem voor vragen rechtstreeks contact op met uw boekhouder via uw beveiligde omgeving.
+                </p>
+              </div>
+              <p className="text-[11px] font-semibold text-ink-800">
+                SafeVault – Uw veilige omgeving voor het aanleveren en verwerken van uw boekhoudgegevens
+              </p>
             </div>
           </div>
           <p className="text-xs text-ink-400 italic">

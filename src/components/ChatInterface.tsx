@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { api } from "@/api";
+import { api, getSessionToken, FN_BASE } from "@/api";
 import { useToast } from "@/components/Toast";
 import { Spinner, formatDateTime } from "@/components/ui";
-import { Send, Paperclip, FileText, Download, X } from "lucide-react";
+import { Send, Paperclip, FileText, Download, X, ImageIcon, Eye } from "lucide-react";
 import type { Communication } from "@/types";
 
 interface ChatInterfaceProps {
@@ -163,6 +163,15 @@ export function ChatInterface({ customerId, customerName, currentUserRole }: Cha
     }
   };
 
+  const handleView = async (fileId: string) => {
+    try {
+      const res = await api.userFileView(fileId);
+      window.open(res.url, "_blank");
+    } catch {
+      push("error", "Kan bestand niet openen.");
+    }
+  };
+
   // Parse custom attachment structure in messages
   const parseMessage = (body: string) => {
     const attachmentRegex = /📎\s*\[attachment:([^:]+):([^:]+):([^:]+):([^\]]+)\]/;
@@ -257,31 +266,65 @@ export function ChatInterface({ customerId, customerName, currentUserRole }: Cha
                 >
                   {/* Attachment card rendering */}
                   {parsed.hasAttachment && parsed.attachment && (
-                    <div 
-                      className={`mb-2 flex items-center justify-between gap-4 p-3 rounded-xl border text-xs max-w-sm ${
-                        isMe 
-                          ? "bg-brand-700/50 border-brand-500/30 text-white" 
-                          : "bg-ink-50 border-ink-200 text-ink-700"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <FileText className="h-5 w-5 flex-shrink-0 opacity-85" />
-                        <div className="min-w-0">
-                          <p className="font-medium truncate" title={parsed.attachment.name}>
-                            {parsed.attachment.name}
-                          </p>
-                          <p className={`text-[10px] ${isMe ? "text-brand-200" : "text-ink-400"}`}>
-                            {formatSize(parsed.attachment.size)}
-                          </p>
+                    <div className="mb-2 space-y-2">
+                      {/* Image Preview */}
+                      {parsed.attachment.mimeType.startsWith("image/") && (
+                        <div className="relative group cursor-pointer overflow-hidden rounded-xl border border-ink-200 bg-ink-100 max-w-sm"
+                             onClick={() => handleView(parsed.attachment!.fileId)}>
+                          <img 
+                            src={`${FN_BASE}/user/files/${parsed.attachment.fileId}/view?token=${getSessionToken()}`}
+                            alt={parsed.attachment.name}
+                            className="w-full h-auto max-h-[300px] object-contain transition-transform group-hover:scale-[1.02]"
+                            onError={(e) => {
+                              // If direct image loading fails (e.g. auth issues), we'll fall back to showing just the file card
+                              (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                          />
+                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                            <Eye className="text-white opacity-0 group-hover:opacity-100 h-8 w-8 drop-shadow-md" />
+                          </div>
+                        </div>
+                      )}
+
+                      <div 
+                        className={`flex items-center justify-between gap-4 p-3 rounded-xl border text-xs max-w-sm ${
+                          isMe 
+                            ? "bg-brand-700/50 border-brand-500/30 text-white" 
+                            : "bg-ink-50 border-ink-200 text-ink-700"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          {parsed.attachment.mimeType.startsWith("image/") ? (
+                            <ImageIcon className="h-5 w-5 flex-shrink-0 opacity-85" />
+                          ) : (
+                            <FileText className="h-5 w-5 flex-shrink-0 opacity-85" />
+                          )}
+                          <div className="min-w-0">
+                            <p className="font-medium truncate" title={parsed.attachment.name}>
+                              {parsed.attachment.name}
+                            </p>
+                            <p className={`text-[10px] ${isMe ? "text-brand-200" : "text-ink-400"}`}>
+                              {formatSize(parsed.attachment.size)}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleView(parsed.attachment!.fileId)}
+                            className="p-1.5 rounded-lg transition-colors hover:bg-black/10 flex-shrink-0"
+                            title="Bestand bekijken"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDownload(parsed.attachment!.fileId)}
+                            className="p-1.5 rounded-lg transition-colors hover:bg-black/10 flex-shrink-0"
+                            title="Bestand downloaden"
+                          >
+                            <Download className="h-4 w-4" />
+                          </button>
                         </div>
                       </div>
-                      <button
-                        onClick={() => handleDownload(parsed.attachment!.fileId)}
-                        className={`p-1.5 rounded-lg transition-colors hover:bg-black/10 flex-shrink-0`}
-                        title="Bestand downloaden"
-                      >
-                        <Download className="h-4 w-4" />
-                      </button>
                     </div>
                   )}
 

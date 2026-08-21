@@ -2,6 +2,7 @@ import type {
   LoginResponse,
   AuthAccount,
   OwnerStats,
+  OwnerOrganization,
   OwnerUser,
   WarningLog,
   BlockedAccount,
@@ -25,7 +26,7 @@ import type {
   ReminderResult,
 } from "@/types";
 
-const FN_BASE = "/api";
+export const FN_BASE = "/api";
 
 const TOKEN_KEY = "boekhoud_session_token";
 const ACCOUNT_KEY = "boekhoud_session_account";
@@ -192,6 +193,7 @@ export const api = {
 
   // ===== Owner =====
   ownerStats: () => request<OwnerStats>("/owner/stats"),
+  ownerOrganizations: () => request<{ organizations: OwnerOrganization[] }>("/owner/organizations"),
   ownerUsers: () => request<{ users: OwnerUser[] }>("/owner/users"),
   ownerCustomers: () => request<{ customers: { id: string; number: string; name: string; status: string; owner_id: string | null }[] }>("/owner/customers"),
   ownerAssignCustomers: (userId: string, customerIds: string[]) =>
@@ -224,15 +226,23 @@ export const api = {
     request<{ ok: boolean; message: string }>(`/owner/users/${userId}/reset-2fa`, {
       method: "POST",
     }),
-  ownerDeleteUser: (userId: string, password?: string) =>
+  ownerDeleteUser: (userId: string) =>
     request<{ ok: boolean }>("/owner/delete-user", {
       method: "POST",
-      body: JSON.stringify({ userId, password }),
+      body: JSON.stringify({ userId }),
     }),
   ownerUnblock: (accountId: string) =>
     request<{ ok: boolean }>("/owner/unblock", {
       method: "POST",
       body: JSON.stringify({ accountId }),
+    }),
+  ownerResolveWarning: (id: string) =>
+    request<{ ok: boolean }>(`/owner/warnings/${id}/resolve`, {
+      method: "POST"
+    }),
+  ownerResolveAllWarnings: () =>
+    request<{ ok: boolean }>("/owner/warnings/resolve-all", {
+      method: "POST"
     }),
   ownerBlocked: () => request<{ blocked: BlockedAccount[] }>("/owner/blocked"),
   ownerWarnings: () => request<{ warnings: WarningLog[] }>("/owner/warnings"),
@@ -301,7 +311,18 @@ export const api = {
   dossierUpdateFileMetadata: (fileId: string, data: { category: string; quarter: string | null; year: number | null }) =>
     request<{ ok: boolean }>(`/dossier/files/${fileId}/metadata`, { method: "PUT", body: JSON.stringify(data) }),
   dossierArchive: (customerId: string, folderId?: string | null) =>
-    request<{ folders: ArchiveFolder[]; files: ArchiveFile[] }>(`/dossier/${customerId}/archive${folderId ? `?folderId=${folderId}` : ""}`),
+    request<{ folders: ArchiveFolder[]; files: ArchiveFile[]; notes: UserNote[] }>(`/dossier/${customerId}/archive${folderId ? `?folderId=${folderId}` : ""}`),
+  dossierArchiveAllFolders: (customerId: string) =>
+    request<{ folders: ArchiveFolder[] }>(`/dossier/${customerId}/archive/all-folders`),
+  dossierMoveNoteToArchive: (noteId: string, folderId: string) =>
+    request<{ ok: boolean; note: UserNote }>(`/dossier/notes/${noteId}/move-to-archive`, {
+      method: "POST",
+      body: JSON.stringify({ folderId }),
+    }),
+  dossierRestoreNoteFromArchive: (noteId: string) =>
+    request<{ ok: boolean; note: UserNote }>(`/dossier/notes/${noteId}/restore-to-notes`, {
+      method: "POST",
+    }),
   dossierCreateFolder: (customerId: string, name: string, parentId?: string | null) =>
     request<{ folder: ArchiveFolder }>(`/dossier/${customerId}/archive/folders`, { method: "POST", body: JSON.stringify({ name, parentId: parentId ?? null }) }),
   dossierRenameFolder: (folderId: string, name: string) =>
@@ -338,29 +359,31 @@ export const api = {
     customerId: string,
     title: string,
     body: string,
-    visible_to_customer: boolean = false,
-    file_path?: string | null,
-    file_name?: string | null,
-    file_size?: number | null,
-    mime_type?: string | null
+    filePath?: string | null,
+    fileName?: string | null,
+    fileSize?: number | null,
+    mimeType?: string | null,
+    visibleToCustomer?: boolean,
+    attachments?: any[]
   ) =>
     request<{ note: UserNote }>(`/dossier/${customerId}/notes`, {
       method: "POST",
-      body: JSON.stringify({ title, body, visible_to_customer, file_path, file_name, file_size, mime_type }),
+      body: JSON.stringify({ title, body, filePath, fileName, fileSize, mimeType, visibleToCustomer, attachments }),
     }),
   dossierUpdateNote: (
     noteId: string,
     title: string,
     body: string,
-    visible_to_customer: boolean = false,
-    file_path?: string | null,
-    file_name?: string | null,
-    file_size?: number | null,
-    mime_type?: string | null
+    filePath?: string | null,
+    fileName?: string | null,
+    fileSize?: number | null,
+    mimeType?: string | null,
+    visibleToCustomer?: boolean,
+    attachments?: any[]
   ) =>
     request<{ ok: boolean }>(`/dossier/notes/${noteId}`, {
       method: "PUT",
-      body: JSON.stringify({ title, body, visible_to_customer, file_path, file_name, file_size, mime_type }),
+      body: JSON.stringify({ title, body, filePath, fileName, fileSize, mimeType, visibleToCustomer, attachments }),
     }),
   dossierDeleteNote: (noteId: string) =>
     request<{ ok: boolean }>(`/dossier/notes/${noteId}`, { method: "DELETE" }),
@@ -381,10 +404,35 @@ export const api = {
       method: "POST",
       body: formData,
     }),
+  dossierUploadCommunicationAttachment: (customerId: string, formData: FormData) =>
+    request<{ filePath: string; fileName: string; fileSize: number; mimeType: string }>(
+      `/dossier/${customerId}/communications/upload`,
+      { method: "POST", body: formData },
+    ),
+  dossierCommunicationAttachmentView: (filePath: string) =>
+    request<{ url: string }>(`/dossier/communications/attachment/view?path=${encodeURIComponent(filePath)}`),
   dossierCommunications: (customerId: string) =>
     request<{ communications: Communication[] }>(`/dossier/${customerId}/communications`),
-  dossierLogCommunication: (customerId: string, data: { subject: string; body: string; quarter?: string | null; year?: number | null; status?: string }) =>
-    request<{ communication: Communication; warning?: string }>(`/dossier/${customerId}/communications`, { method: "POST", body: JSON.stringify(data) }),
+  dossierLogCommunication: (
+    customerId: string,
+    data: {
+      id?: string;
+      subject: string;
+      body: string;
+      quarter?: string | null;
+      year?: number | null;
+      status?: string;
+      attachments?: import("./types").CommunicationAttachment[];
+    },
+  ) =>
+    request<{ communication: Communication; warning?: string }>(`/dossier/${customerId}/communications`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  dossierSendDraftCommunication: (customerId: string, commId: string) =>
+    request<{ ok: boolean; communication: Communication }>(`/dossier/${customerId}/communications/${commId}/send`, { method: "POST" }),
+  dossierDeleteCommunication: (customerId: string, commId: string) =>
+    request<{ ok: boolean }>(`/dossier/${customerId}/communications/${commId}`, { method: "DELETE" }),
   dossierStatus: (customerId: string, year?: number) =>
     request<{ year: number; quarters: AdminStatusRow[] }>(`/dossier/${customerId}/status${year ? `?year=${year}` : ""}`),
   dossierUpdateStatus: (customerId: string, year: number, quarter: string, status: string) =>
@@ -429,7 +477,7 @@ export const api = {
 
   // ===== Customer archive (read-only) =====
   customerArchive: (folderId?: string | null) =>
-    request<{ folders: ArchiveFolder[]; files: ArchiveFile[] }>(`/customer/archive${folderId ? `?folderId=${folderId}` : ""}`),
+    request<{ folders: ArchiveFolder[]; files: ArchiveFile[]; notes: UserNote[] }>(`/customer/archive${folderId ? `?folderId=${folderId}` : ""}`),
   customerArchiveDownload: (fileId: string) =>
     request<{ url: string; name: string }>(`/customer/archive/files/${fileId}/download`),
   customerCommunications: () =>

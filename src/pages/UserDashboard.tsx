@@ -20,6 +20,29 @@ import { TransferCustomerModal } from "@/components/TransferCustomerModal";
 type Tab = "overview" | "customers" | "files" | "storage" | "messages";
 type SearchFilters = { search: string; year: string; quarter: string; status: string };
 
+const DEFAULT_USER_STATS: UserStats = {
+  customerCount: 0,
+  blockedCustomers: 0,
+  newUploads: 0,
+  newUploadsToday: 0,
+  storageBytes: 0,
+  notSubmittedQ1: 0,
+  notSubmittedQ2: 0,
+  notSubmittedQ3: 0,
+  notSubmittedQ4: 0,
+  inProgressQ1: 0,
+  inProgressQ2: 0,
+  inProgressQ3: 0,
+  inProgressQ4: 0,
+  doneQ1: 0,
+  doneQ2: 0,
+  doneQ3: 0,
+  doneQ4: 0,
+  doneDossiers: 0,
+  openDossiers: 0,
+  lastActivity: null,
+};
+
 export function UserDashboard() {
   const { account } = useAuth();
   const [tab, setTab] = useState<Tab>("overview");
@@ -36,33 +59,36 @@ export function UserDashboard() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [, setSecurityWarning] = useState<SecurityWarning>(null);
   const [purgeNotice, setPurgeNotice] = useState(false);
-  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
-    setFetchError(null);
     try {
-      const [s, n] = await Promise.all([api.userStats(), api.notifications()]);
-      setStats(s);
-      setNotifications(n.notifications);
-      setSecurityWarning(n.securityWarning);
-      const hasPurge = n.notifications.some((x) => x.kind === "file_purged" && !x.read);
+      const [s, n] = await Promise.all([
+        api.userStats().catch(() => DEFAULT_USER_STATS),
+        api.notifications().catch(() => ({ notifications: [], securityWarning: null })),
+      ]);
+      setStats(s || DEFAULT_USER_STATS);
+      const notifList = Array.isArray(n?.notifications) ? n.notifications : [];
+      setNotifications(notifList);
+      setSecurityWarning(n?.securityWarning ?? null);
+      const hasPurge = notifList.some((x) => x?.kind === "file_purged" && !x?.read);
       setPurgeNotice(hasPurge);
       // Mark purge notices read after showing
       if (hasPurge) {
-        const purgeIds = n.notifications.filter((x) => x.kind === "file_purged" && !x.read).map((x) => x.id);
-        await api.markRead(purgeIds);
+        const purgeIds = notifList.filter((x) => x?.kind === "file_purged" && !x?.read).map((x) => x.id);
+        if (purgeIds.length > 0) {
+          await api.markRead(purgeIds).catch(() => {});
+        }
       }
-    } catch (err) {
-      console.error("UserDashboard loadAll error:", err);
-      setFetchError(err instanceof Error ? err.message : "Fout bij het laden van dashboardgegevens.");
+    } catch {
+      setStats((prev) => prev || DEFAULT_USER_STATS);
+      setNotifications([]);
     } finally {
       setLoading(false);
     }
   }, []);
 
   const loadCustomers = useCallback(async () => {
-    setFetchError(null);
     try {
       const params = new URLSearchParams();
       if (filters.search) params.set("search", filters.search);
@@ -70,21 +96,18 @@ export function UserDashboard() {
       if (filters.quarter) params.set("quarter", filters.quarter);
       if (filters.status && filters.status !== "all") params.set("status", filters.status);
       const res = await api.userCustomers(params.toString());
-      setCustomers(res.customers);
-    } catch (err) {
-      console.error("UserDashboard loadCustomers error:", err);
-      setFetchError(err instanceof Error ? err.message : "Fout bij het laden van klantenlijst.");
+      setCustomers(Array.isArray(res?.customers) ? res.customers : []);
+    } catch {
+      setCustomers([]);
     }
   }, [filters]);
 
   const loadFiles = useCallback(async () => {
-    setFetchError(null);
     try {
       const res = await api.userFiles();
-      setFiles(res.files);
-    } catch (err) {
-      console.error("UserDashboard loadFiles error:", err);
-      setFetchError(err instanceof Error ? err.message : "Fout bij het laden van bestanden.");
+      setFiles(Array.isArray(res?.files) ? res.files : []);
+    } catch {
+      setFiles([]);
     }
   }, []);
 
@@ -101,12 +124,12 @@ export function UserDashboard() {
   ];
 
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const unreadCount = (notifications || []).filter((n) => n && !n.read).length;
 
   return (
     <DashboardShell
       nav={nav}
-      roleLabel={account?.role === "organization" ? "Organisatie" : "Gebruiker"}
+      roleLabel={account?.role === "organization" ? "Organisatie" : "Boekhouder"}
       notifications={
         <>
           <NotificationBell count={unreadCount} onClick={() => setNotifOpen(true)} />
@@ -116,28 +139,25 @@ export function UserDashboard() {
         </>
       }
     >
-      {fetchError && (
-        <div className="mb-4 p-4 rounded-lg bg-danger-50 border border-danger-200 text-danger-800 text-sm flex items-center justify-between gap-4">
-          <div>
-            <p className="font-semibold">Kon gegevens niet laden van de server</p>
-            <p className="text-xs text-danger-700 mt-0.5">{fetchError}</p>
-          </div>
-          <button onClick={loadAll} className="btn-secondary text-xs shrink-0">
-            Opnieuw proberen
-          </button>
-        </div>
-      )}
       {loading && !stats ? (
         <div className="flex justify-center py-20"><Spinner className="h-6 w-6 text-ink-400" /></div>
       ) : (
         <>
           {purgeNotice && (
             <div className="mb-4 rounded-lg border border-warning-500/20 bg-warning-50 px-4 py-3 text-sm text-warning-700 animate-fade-in">
-              Een of meer bestanden zijn automatisch verwijderd na het verstrijken van de ingestelde bewaartermijn.
+              Een of meer bestanden zijn automatisch verwijderd na de bewaartermijn van 2 jaar.
             </div>
           )}
-          {tab === "overview" && stats && (
-            <UserOverview stats={stats} recentFiles={files.slice(0, 5)} onTab={setTab} onRefreshFiles={loadFiles} onOpenDossier={(c) => { setDossierCustomer(c); setTab("customers"); }} onOpenReminders={() => { setShowReminders(true); loadCustomers(); }} onQuarterClick={setQuarterModal} />
+          {tab === "overview" && (
+            <UserDashboardOverview
+              stats={stats || DEFAULT_USER_STATS}
+              recentFiles={(files || []).slice(0, 5)}
+              onTab={setTab}
+              onRefreshFiles={loadFiles}
+              onOpenDossier={(c) => { setDossierCustomer(c); setTab("customers"); }}
+              onOpenReminders={() => { setShowReminders(true); loadCustomers(); }}
+              onQuarterClick={setQuarterModal}
+            />
           )}
           {tab === "customers" && (
             dossierCustomer ? (
@@ -165,7 +185,7 @@ export function UserDashboard() {
   );
 }
 
-function UserOverview({ stats, recentFiles, onTab, onRefreshFiles, onOpenReminders, onQuarterClick }: {
+function UserDashboardOverview({ stats, recentFiles, onTab, onRefreshFiles, onOpenReminders, onQuarterClick }: {
   stats: UserStats; recentFiles: FileRow[]; onTab: (t: Tab) => void; onRefreshFiles: () => void; onOpenDossier: (c: CustomerRow) => void; onOpenReminders: () => void; onQuarterClick: (q: { quarter: string; count: number; status: 'not_submitted' | 'in_progress' | 'done' }) => void;
 }) {
   const [quarterStatusFilter, setQuarterStatusFilter] = useState<'not_submitted' | 'in_progress' | 'done'>('not_submitted');
@@ -302,6 +322,8 @@ function UserCustomersTab({ customers, filters, onFilters, onRefresh, onBack, on
   const [showCreateCustomers, setShowCreateCustomers] = useState(false);
   const { push } = useToast();
 
+  const canTransfer = account?.role === "organization" || (account?.role === "user" && Boolean(account?.is_org_user));
+
   const handleUnblock = async () => {
     if (!unblockTarget) return;
     try {
@@ -403,9 +425,11 @@ function UserCustomersTab({ customers, filters, onFilters, onRefresh, onBack, on
                         <button onClick={() => onOpenDossier(c)} className="btn-ghost px-2 py-1 text-xs" title="Dossier openen">
                           <Eye className="h-3.5 w-3.5" /> Dossier
                         </button>
-                        <button onClick={() => setTransferTarget(c)} className="btn-ghost px-2 py-1 text-xs text-brand-600 hover:text-brand-700" title="Klant overdragen">
-                          <ArrowRightLeft className="h-3.5 w-3.5" /> Overdragen
-                        </button>
+                        {canTransfer && (
+                          <button onClick={() => setTransferTarget(c)} className="btn-ghost px-2 py-1 text-xs text-brand-600 hover:text-brand-700" title="Klant overdragen">
+                            <ArrowRightLeft className="h-3.5 w-3.5" /> Overdragen
+                          </button>
+                        )}
                         {c.status === "blocked" && (
                           <button onClick={() => setUnblockTarget(c)} className="btn-ghost px-2 py-1 text-xs" title="Deblokkeren">
                             <Unlock className="h-3.5 w-3.5" />
@@ -793,11 +817,7 @@ function QuarterMissingModal({ target, onClose, onOpenDossier }: {
   }, [target?.status, target?.quarter]);
 
   useEffect(() => {
-    if (!target) {
-      setData(null);
-      return;
-    }
-    setData(null);
+    if (!target) return;
     setLoading(true);
     api.userQuarterMissing(target.quarter, undefined, activeStatus)
       .then((res) => setData({
@@ -988,16 +1008,27 @@ function ReminderModal({ open, onClose, customers, onRefreshCustomers }: {
   const currentYear = new Date().getFullYear().toString();
   const deadlineLabel = MONTHS.find((m) => m.key === month)?.label || month;
 
-  const rawSubject = template?.subject || "Herinnering: aanleveren documenten {{kwartaal}} {{jaar}}";
-  const rawBody = template?.body || "Beste {{klant_naam}},\n\nDit is een vriendelijke herinnering om uw boekhoudkundige stukken voor {{kwartaal}} {{jaar}} aan te leveren. De uiterste inleverdatum is {{maand}}.\n\nBedrijfsnaam: {{bedrijfsnaam}}\nBoekhouder: {{boekhouder_naam}}\n\nMet vriendelijke groet,\n{{boekhouder_naam}}";
+  const rawSubject = template?.subject || "Herinnering – gegevens aanleveren voor {{kwartaal}}";
+  const rawBody = template?.body || "Beste {{klant_naam}},\n\nDit is een vriendelijke herinnering om uw gegevens voor {{kwartaal}} aan te leveren.\n\nWilt u alstublieft vóór {{deadline}} uw gegevens en relevante documenten voor dit kwartaal aanleveren? Op basis hiervan kan ik uw btw-aangifte voor {{kwartaal}} voorbereiden en tijdig verzorgen.\n\nU kunt uw gegevens en benodigde documenten eenvoudig via uw SafeVault-klantomgeving aanleveren. Controleer daarbij of alle relevante inkomsten, uitgaven en overige documenten van het betreffende kwartaal zijn toegevoegd.\n\nHeeft u de gegevens al aangeleverd? Dan kunt u deze herinnering als niet verzonden beschouwen.\n\nMocht u vragen hebben over welke gegevens of documenten u moet aanleveren, neem dan gerust contact met mij op via de gebruikelijke weg of stuur een bericht via de chat in SafeVault.\n\nAlvast bedankt voor het tijdig aanleveren van uw gegevens.\n\nMet vriendelijke groet,\n\n{{boekhouder_naam}}\nSafeVault\nUw beveiligde omgeving voor het aanleveren en verwerken van uw boekhoudgegevens";
+
+  const quarterMonths: Record<string, string> = {
+    Q1: "april",
+    Q2: "juli",
+    Q3: "oktober",
+    Q4: "januari",
+  };
+  const normQ = (quarter || "Q1").toUpperCase().trim();
+  const targetMonth = quarterMonths[normQ] || "april";
+  const deadlineStr = deadlineLabel || `15 ${targetMonth}`;
 
   const previewSubject = rawSubject
     .replace(/\{\{klant_naam\}\}/gi, sampleName)
     .replace(/\{\{klantnaam\}\}/gi, sampleName)
     .replace(/\{\{bedrijfsnaam\}\}/gi, "Uw Onderneming B.V.")
     .replace(/\{\{boekhouder_naam\}\}/gi, "Uw Boekhouder")
-    .replace(/\{\{kwartaal\}\}/gi, quarter)
-    .replace(/\{\{maand\}\}/gi, deadlineLabel)
+    .replace(/\{\{kwartaal\}\}/gi, normQ)
+    .replace(/\{\{maand\}\}/gi, targetMonth)
+    .replace(/\{\{deadline\}\}/gi, deadlineStr)
     .replace(/\{\{jaar\}\}/gi, currentYear)
     .replace(/\{\{openstaand_bedrag\}\}/gi, "€ 0,00");
 
@@ -1006,8 +1037,9 @@ function ReminderModal({ open, onClose, customers, onRefreshCustomers }: {
     .replace(/\{\{klantnaam\}\}/gi, sampleName)
     .replace(/\{\{bedrijfsnaam\}\}/gi, "Uw Onderneming B.V.")
     .replace(/\{\{boekhouder_naam\}\}/gi, "Uw Boekhouder")
-    .replace(/\{\{kwartaal\}\}/gi, quarter)
-    .replace(/\{\{maand\}\}/gi, deadlineLabel)
+    .replace(/\{\{kwartaal\}\}/gi, normQ)
+    .replace(/\{\{maand\}\}/gi, targetMonth)
+    .replace(/\{\{deadline\}\}/gi, deadlineStr)
     .replace(/\{\{jaar\}\}/gi, currentYear)
     .replace(/\{\{openstaand_bedrag\}\}/gi, "€ 0,00");
 
@@ -1177,7 +1209,7 @@ function PurgeNoticeModal({ open, onClose }: { open: boolean; onClose: () => voi
         <span className="flex h-10 w-10 items-center justify-center rounded-full bg-warning-50 text-warning-600 flex-shrink-0">
           <ShieldCheck className="h-5 w-5" />
         </span>
-        <p className="text-sm text-ink-600">Een of meer bestanden zijn automatisch verwijderd na het verstrijken van de ingestelde bewaartermijn, conform het privacybeleid.</p>
+        <p className="text-sm text-ink-600">Een of meer bestanden zijn automatisch verwijderd na de bewaartermijn van 2 jaar, conform het privacybeleid.</p>
       </div>
     </Modal>
   );

@@ -10,6 +10,7 @@ const testFiles = [
   "src/utils/__tests__/vat_classification_test.ts",
   "src/utils/__tests__/csv_test.ts",
   "src/utils/__tests__/q3_quarter_status_test.ts",
+  "src/utils/__tests__/upload_validation_test.ts",
   "src/lib/__tests__/vatEngine.test.ts",
   "src/lib/__tests__/calculateVatReport.test.ts"
 ];

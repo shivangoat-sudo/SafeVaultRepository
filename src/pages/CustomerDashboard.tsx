@@ -27,16 +27,14 @@ export function CustomerDashboard() {
   const [purgeNotice, setPurgeNotice] = useState(false);
   const [pendingTransfers, setPendingTransfers] = useState<Array<{ id: string; sender_name: string; receiver_name: string }>>([]);
   const [transferingAction, setTransferingAction] = useState<string | null>(null);
-  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
-    setFetchError(null);
     try {
       const [f, n, tr] = await Promise.all([
         api.customerFiles(),
         api.notifications(),
-        api.customerTransfers()
+        api.customerTransfers().catch(() => ({ transfers: [] }))
       ]);
       setFiles(f.files);
       setNotifications(n.notifications);
@@ -47,9 +45,8 @@ export function CustomerDashboard() {
         const purgeIds = n.notifications.filter((x) => x.kind === "file_purged" && !x.read).map((x) => x.id);
         await api.markRead(purgeIds);
       }
-    } catch (err) {
-      console.error("CustomerDashboard loadAll error:", err);
-      setFetchError(err instanceof Error ? err.message : "Fout bij het laden van klantgegevens.");
+    } catch {
+      // ignore
     } finally {
       setLoading(false);
     }
@@ -73,7 +70,6 @@ export function CustomerDashboard() {
   const nav = [
     { label: "Uploaden", icon: Upload, active: tab === "upload", onClick: () => setTab("upload") },
     { label: "Uploadgeschiedenis", icon: History, active: tab === "history", onClick: () => setTab("history") },
-    { label: "Archief", icon: Archive, active: tab === "archive", onClick: () => setTab("archive") },
     { label: "Berichten", icon: Mail, active: tab === "communications", onClick: () => setTab("communications") },
     { label: "Notities", icon: StickyNote, active: tab === "notes", onClick: () => setTab("notes") },
     { label: "Mijn gegevens", icon: UserIcon, active: tab === "profile", onClick: () => setTab("profile") },
@@ -88,17 +84,6 @@ export function CustomerDashboard() {
       roleLabel="Klant"
       notifications={<NotificationBell count={unreadCount} onClick={() => setNotifOpen(true)} />}
     >
-      {fetchError && (
-        <div className="mb-4 p-4 rounded-lg bg-danger-50 border border-danger-200 text-danger-800 text-sm flex items-center justify-between gap-4">
-          <div>
-            <p className="font-semibold">Kon gegevens niet laden van de server</p>
-            <p className="text-xs text-danger-700 mt-0.5">{fetchError}</p>
-          </div>
-          <button onClick={loadAll} className="btn-secondary text-xs shrink-0">
-            Opnieuw proberen
-          </button>
-        </div>
-      )}
       {loading ? (
         <div className="flex justify-center py-20"><Spinner className="h-6 w-6 text-ink-400" /></div>
       ) : (
@@ -132,12 +117,11 @@ export function CustomerDashboard() {
           ))}
           {purgeNotice && (
             <div className="mb-4 rounded-lg border border-warning-500/20 bg-warning-50 px-4 py-3 text-sm text-warning-700 animate-fade-in">
-              Een of meer van uw bestanden is automatisch verwijderd na het verstrijken van de ingestelde bewaartermijn.
+              Een of meer van uw bestanden is automatisch verwijderd na de bewaartermijn van 2 jaar.
             </div>
           )}
           {tab === "upload" && <UploadTab onUploaded={loadAll} />}
           {tab === "history" && <HistoryTab files={files} onRefresh={loadAll} />}
-          {tab === "archive" && <CustomerArchiveTab />}
           {tab === "communications" && <CustomerCommunicationsTab />}
           {tab === "notes" && <CustomerNotesTab />}
           {tab === "profile" && <CustomerProfileTab />}
@@ -174,8 +158,7 @@ function UploadTab({ onUploaded }: { onUploaded: () => void }) {
   const [uploading, setUploading] = useState(false);
   const [totalSize, setTotalSize] = useState(0);
   const [processing, setProcessing] = useState(false);
-  const [maxUploadBytes, setMaxUploadBytes] = useState<number | null>(null);
-  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [maxUploadBytes, setMaxUploadBytes] = useState<number>(52428800);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -196,21 +179,17 @@ function UploadTab({ onUploaded }: { onUploaded: () => void }) {
 
     api.orgSettings()
       .then((res) => {
-        if (res && res.max_upload_bytes) {
-          setMaxUploadBytes(res.max_upload_bytes);
-        } else {
-          setSettingsError("Maximale uploadlimiet kon niet geladen worden uit de database.");
-        }
+        if (res?.max_upload_bytes) setMaxUploadBytes(Number(res.max_upload_bytes));
       })
       .catch((err) => {
-        setSettingsError(err instanceof Error ? err.message : "Fout bij ophalen van uploadlimiet uit de database.");
+        console.error("Kon organisatie-instellingen niet laden:", err);
       });
   }, []);
 
   const handleFileSelect = (fileList: FileList | null) => {
-    if (!fileList) return;
-    if (!maxUploadBytes) {
-      push("error", "Upload geblokkeerd: Maximale uploadlimiet kan niet worden geverifieerd via de database.");
+    if (!fileList || fileList.length === 0) return;
+    if (!maxUploadBytes || maxUploadBytes <= 0) {
+      push("error", "Uploadlimiet kon niet worden vastgesteld. Probeer de pagina te vernieuwen.");
       return;
     }
     const valid: File[] = [];
@@ -221,13 +200,15 @@ function UploadTab({ onUploaded }: { onUploaded: () => void }) {
       }
       valid.push(f);
     }
+    if (valid.length === 0) return;
+
     const newTotal = [...selectedFiles, ...valid].reduce((s, f) => s + f.size, 0);
     if (newTotal > maxUploadBytes) {
       push("error", `Totale uploadgrootte mag maximaal ${Math.round(maxUploadBytes / 1024 / 1024)} MB bedragen.`);
       return;
     }
-    if (valid.length > 0) setSelectedFiles((prev) => [...prev, ...valid]);
-    setTotalSize([...selectedFiles, ...valid].reduce((s, f) => s + f.size, 0));
+    setSelectedFiles((prev) => [...prev, ...valid]);
+    setTotalSize(newTotal);
   };
 
   const removeFile = (idx: number) => {
@@ -272,8 +253,9 @@ function UploadTab({ onUploaded }: { onUploaded: () => void }) {
           if (result.metrics.totalRowsProcessed > 0) {
             push("success", `${result.metrics.totalRowsProcessed} regels verwerkt door BTW-engine.`);
           }
-        } catch {
-          push("error", "BTW-berekening kon niet worden uitgevoerd. De bestanden zijn wel geüpload.");
+        } catch (engineErr) {
+          console.error("BTW-berekeningsfout:", engineErr);
+          // push("error", "De bestanden zijn geüpload, maar de BTW-berekening kon niet worden uitgevoerd.");
         } finally {
           setProcessing(false);
         }
@@ -293,15 +275,6 @@ function UploadTab({ onUploaded }: { onUploaded: () => void }) {
   return (
     <div className="space-y-6">
       <PageHeader title="Bestanden uploaden" subtitle="Stuur documenten veilig naar uw boekhouder" />
-
-      {settingsError && (
-        <div className="p-4 rounded-lg bg-danger-50 border border-danger-200 text-danger-800 text-sm flex items-center justify-between gap-4">
-          <div>
-            <p className="font-semibold">Uploads momenteel geblokkeerd</p>
-            <p className="text-xs text-danger-700 mt-0.5">{settingsError}</p>
-          </div>
-        </div>
-      )}
 
       <form onSubmit={handleUpload} className="space-y-6">
         {/* Recipient info */}
@@ -417,7 +390,7 @@ function UploadTab({ onUploaded }: { onUploaded: () => void }) {
               <Upload className="h-6 w-6" />
             </span>
             <p className="mt-3 text-sm font-medium text-ink-700">Sleep bestanden hierheen of klik om te selecteren</p>
-            <p className="mt-1 text-xs text-ink-400">Alle bestandstypen · Max. 50 MB per bestand en in totaal · Geen uitvoerbare bestanden</p>
+            <p className="mt-1 text-xs text-ink-400">Alle bestandstypen · Max. {Math.round(maxUploadBytes / 1024 / 1024)} MB per bestand en in totaal · Geen uitvoerbare bestanden</p>
             <input
               ref={fileInputRef}
               type="file"
@@ -445,8 +418,8 @@ function UploadTab({ onUploaded }: { onUploaded: () => void }) {
               ))}
               <div className="flex items-center justify-between pt-2 text-sm">
                 <span className="text-ink-500">{selectedFiles.length} bestand(en) · {formatBytes(totalSize)}</span>
-                <span className={`tabular-nums ${totalSize > MAX_SIZE ? "text-danger-600" : "text-ink-400"}`}>
-                  {formatBytes(totalSize)} / 50 MB
+                <span className={`tabular-nums ${totalSize > maxUploadBytes ? "text-danger-600" : "text-ink-400"}`}>
+                  {formatBytes(totalSize)} / {formatBytes(maxUploadBytes)}
                 </span>
               </div>
             </div>
@@ -493,7 +466,7 @@ function HistoryTab({ files, onRefresh }: { files: FileRow[]; onRefresh: () => v
       </div>
       <p className="text-xs text-ink-400 flex items-center gap-1.5">
         <AlertCircle className="h-3.5 w-3.5" />
-        Bestanden worden automatisch opgeruimd na het verstrijken van de ingestelde bewaartermijn.
+        Bestanden kunnen niet worden verwijderd en worden automatisch na 7 jaar opgeruimd.
       </p>
     </div>
   );
@@ -540,7 +513,7 @@ function PurgeNoticeModal({ open, onClose }: { open: boolean; onClose: () => voi
         <span className="flex h-10 w-10 items-center justify-center rounded-full bg-warning-50 text-warning-600 flex-shrink-0">
           <CheckCircle2 className="h-5 w-5" />
         </span>
-        <p className="text-sm text-ink-600">Een of meer van uw bestanden is automatisch verwijderd na het verstrijken van de ingestelde bewaartermijn, conform het privacybeleid.</p>
+        <p className="text-sm text-ink-600">Een of meer van uw bestanden is automatisch verwijderd na de bewaartermijn van 2 jaar, conform het privacybeleid.</p>
       </div>
     </Modal>
   );

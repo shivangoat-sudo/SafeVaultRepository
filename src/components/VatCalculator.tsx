@@ -137,6 +137,7 @@ export function VatCalculator({ customerId }: { customerId: string }) {
       if (rawTransactions.length === 0) {
         // Fallback for non-standard CSV or legacy bridge
         const engineResult = await processFile(file);
+        
         if (engineResult.metrics.vatReport) {
           const vr = engineResult.metrics.vatReport as unknown as BtwReport;
           const rawTx: RawTransaction[] = vr.transactions.map((t) => {
@@ -158,6 +159,12 @@ export function VatCalculator({ customerId }: { customerId: string }) {
             };
           });
           rawTransactions = rawTx;
+        }
+
+        if (rawTransactions.length === 0) {
+          push("success", "Er zijn geen transacties herkend voor de BTW-verwerking.");
+          setCalculating(false);
+          return;
         }
       }
 

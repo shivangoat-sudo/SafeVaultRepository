@@ -1,0 +1,6 @@
+{
+  "name": "SafeVault",
+  "description": "Secure accounting and vault management platform with strict authentication, role-based access, and TOTP 2FA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

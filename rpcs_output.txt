@@ -1,0 +1,2 @@
+◇ injected env (0) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+All RPC paths: []
