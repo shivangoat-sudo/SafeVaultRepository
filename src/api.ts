@@ -127,7 +127,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   setupStatus: async () => {
     try {
-      const res = await request<{ initialized: boolean }>("/auth/setup-status");
+      const res = await request<any>("/auth/setup-status");
+      if (!res || typeof res !== "object" || typeof res.initialized !== "boolean") {
+        return { initialized: true };
+      }
       return res;
     } catch {
       // Fallback: if serverless or network fails to reach setup-status, assume initialized so owner is never prompted to re-setup
