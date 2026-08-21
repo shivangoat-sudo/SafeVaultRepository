@@ -7,11 +7,21 @@ import path from "path";
 import fs from "fs";
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
+
 export const app = express();
-// import removed to fix Netlify build
 
 import QRCode from "qrcode";
 import { supabase } from "./src/server/lib/supabase.js";
+// ... (rest of imports)
+
+// Safely require vite for development only
+const getVite = () => {
+    const { createRequire } = require("module");
+    const req = createRequire(import.meta.url);
+    return req("vite");
+};
+
+// Inside startServer, update logic
 import {
   comparePassword,
   createSession,
@@ -71,9 +81,17 @@ async function ensureBucketsExist() {
 }
 __name(ensureBucketsExist, "ensureBucketsExist");
 async function startServer() {
-  const PORT = 3e3;
-  await ensureBucketsExist();
+  const PORT = 3000;
+  
   app.use(express.json());
+
+  // Registration of critical routes must happen before any potential blocking operations
+  // ... (rest of route registration code should be implicitly before ensuring buckets)
+
+  // Move bucket initialization to run independently/asynchronously to avoid blocking route registration
+  ensureBucketsExist().catch(err => console.warn("Background bucket initialization failed:", err));
+
+  // Authentication middleware
   const requireAuth = __name(async (req, res, next) => {
     const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith("Bearer ")) {
@@ -6260,7 +6278,8 @@ ${finalBody}`,
     res.status(404).json({ error: "Route niet gevonden." });
   });
   if (process.env.NODE_ENV !== "production") {
-    const { createServer: createViteServer } = require("vite");
+    const req = createRequire(import.meta.url);
+    const { createServer: createViteServer } = req("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
