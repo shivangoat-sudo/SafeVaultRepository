@@ -4,6 +4,9 @@ const __name = (target, value) =>
 import serverless from "serverless-http";
 import express from "express";
 import path from "path";
+import fs from "fs";
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
 export const app = express();
 // import removed to fix Netlify build
 
@@ -6257,7 +6260,7 @@ ${finalBody}`,
     res.status(404).json({ error: "Route niet gevonden." });
   });
   if (process.env.NODE_ENV !== "production") {
-    const { createServer: createViteServer } = await import("vite");
+    const { createServer: createViteServer } = require("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
