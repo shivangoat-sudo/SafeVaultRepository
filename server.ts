@@ -5,8 +5,6 @@ import serverless from "serverless-http";
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { createRequire } from "module";
-const require = createRequire(import.meta.url);
 
 export const app = express();
 
@@ -14,11 +12,16 @@ import QRCode from "qrcode";
 import { supabase } from "./src/server/lib/supabase.js";
 // ... (rest of imports)
 
-// Safely require vite for development only
+// Safely import createRequire for development
+import { createRequire } from "module";
+
+// In production, we don't need Vite's dev server, so we can mock/avoid require("vite")
 const getVite = () => {
-    const { createRequire } = require("module");
+  if (process.env.NODE_ENV !== "production") {
     const req = createRequire(import.meta.url);
     return req("vite");
+  }
+  return null;
 };
 
 // Inside startServer, update logic
