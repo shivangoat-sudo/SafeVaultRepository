@@ -10,7 +10,6 @@ export const app = express();
 
 import QRCode from "qrcode";
 import { supabase } from "./src/server/lib/supabase.js";
-// ... (rest of imports)
 
 // Safely import createRequire for development
 import { createRequire } from "module";
@@ -18,8 +17,9 @@ import { createRequire } from "module";
 // In production, we don't need Vite's dev server, so we can mock/avoid require("vite")
 const getVite = () => {
   if (process.env.NODE_ENV !== "production") {
-    const req = createRequire(import.meta.url);
-    return req("vite");
+    // This is only called in dev, so require is safe here
+    const require = createRequire(import.meta.url);
+    return require("vite");
   }
   return null;
 };
@@ -89,10 +89,8 @@ async function startServer() {
   app.use(express.json());
 
   // Registration of critical routes must happen before any potential blocking operations
-  // ... (rest of route registration code should be implicitly before ensuring buckets)
-
-  // Move bucket initialization to run independently/asynchronously to avoid blocking route registration
-  ensureBucketsExist().catch(err => console.warn("Background bucket initialization failed:", err));
+  
+  // Routes are registered below synchronously.
 
   // Authentication middleware
   const requireAuth = __name(async (req, res, next) => {
@@ -6281,8 +6279,7 @@ ${finalBody}`,
     res.status(404).json({ error: "Route niet gevonden." });
   });
   if (process.env.NODE_ENV !== "production") {
-    const req = createRequire(import.meta.url);
-    const { createServer: createViteServer } = req("vite");
+    const { createServer: createViteServer } = getVite();
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -6300,6 +6297,9 @@ ${finalBody}`,
       console.log(`Server running on http://localhost:${PORT}`);
     });
   }
+
+  // Move bucket initialization to run independently/asynchronously to avoid blocking route registration
+  ensureBucketsExist().catch(err => console.warn("Background bucket initialization failed:", err));
 }
 export const serverPromise = startServer();
 __name(startServer, "startServer");
