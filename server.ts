@@ -6279,13 +6279,12 @@ ${finalBody}`,
     });
   }
 }
+export const serverPromise = startServer();
 __name(startServer, "startServer");
 if (!process.env.NETLIFY) {
-  startServer().catch((err) => {
+  serverPromise.catch((err) => {
     console.error("Server startup error:", err);
   });
-} else {
-  startServer();
 }
 
 export const handler = serverless(app);
