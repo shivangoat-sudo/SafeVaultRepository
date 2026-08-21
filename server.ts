@@ -5,7 +5,8 @@ import serverless from "serverless-http";
 import express from "express";
 import path from "path";
 export const app = express();
-import { createServer as createViteServer } from "vite";
+// import removed to fix Netlify build
+
 import QRCode from "qrcode";
 import { supabase } from "./src/server/lib/supabase.js";
 import {
@@ -6256,6 +6257,7 @@ ${finalBody}`,
     res.status(404).json({ error: "Route niet gevonden." });
   });
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
