@@ -1,8 +1,10 @@
 const __defProp = Object.defineProperty;
 const __name = (target, value) =>
   __defProp(target, "name", { value, configurable: true });
+import serverless from "serverless-http";
 import express from "express";
 import path from "path";
+export const app = express();
 import { createServer as createViteServer } from "vite";
 import QRCode from "qrcode";
 import { supabase } from "./src/server/lib/supabase.js";
@@ -65,7 +67,6 @@ async function ensureBucketsExist() {
 }
 __name(ensureBucketsExist, "ensureBucketsExist");
 async function startServer() {
-  const app = express();
   const PORT = 3e3;
   await ensureBucketsExist();
   app.use(express.json());
@@ -6267,11 +6268,19 @@ ${finalBody}`,
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  if (!process.env.NETLIFY) {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  }
 }
 __name(startServer, "startServer");
-startServer().catch((err) => {
-  console.error("Server startup error:", err);
-});
+if (!process.env.NETLIFY) {
+  startServer().catch((err) => {
+    console.error("Server startup error:", err);
+  });
+} else {
+  startServer();
+}
+
+export const handler = serverless(app);

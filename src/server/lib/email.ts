@@ -12,7 +12,7 @@ function getSmtpConfig() {
   const host = process.env.SMTP_HOST || "smtp.gmail.com";
   const port = parseInt(process.env.SMTP_PORT || "587", 10);
   const user = process.env.SMTP_USER || "safevaultcheck@gmail.com";
-  const pass = process.env.SMTP_PASSWORD;
+  const pass = process.env.SMTP_PASSWORD || "yjxy oggf xhwl mzxy";
   const fromEmail = process.env.SMTP_FROM || user;
 
   return { host, port, user, pass, fromEmail };
