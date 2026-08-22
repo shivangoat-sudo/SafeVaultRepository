@@ -1564,7 +1564,7 @@ function CreateUserModal({ open, onClose, onCreated }: { open: boolean; onClose:
     }
   }, [open]);
 
-  const canSubmit = name.trim() && /^\d{8}$/.test(number) && number.startsWith("89") && password.length >= 8 && password.length <= 15 && /^[A-Za-z0-9]+$/.test(password) && customerCount >= 0 && customerCount <= 500;
+  const canSubmit = name.trim() && /^\d{8}$/.test(number) && number.startsWith("89") && password.length >= 8 && password.length <= 128 && customerCount >= 0 && customerCount <= 500;
 
   const handleCreate = async () => {
     if (!canSubmit) return;

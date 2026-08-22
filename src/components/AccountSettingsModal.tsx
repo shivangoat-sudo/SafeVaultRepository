@@ -1,23 +1,25 @@
-import { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { Modal } from "@/components/Modal";
+import { PasswordField } from "@/components/PasswordField";
 import { api } from "@/api";
 import { useAuth } from "@/auth";
 import { useToast } from "@/components/Toast";
-import { Modal } from "@/components/Modal";
-import { Spinner } from "@/components/ui";
-import { PasswordField } from "@/components/PasswordField";
-import { KeyRound, Save, Trash2, UserPlus, AlertTriangle } from "lucide-react";
+import { Trash2, AlertTriangle } from "lucide-react";
+
+interface AccountSettingsModalProps {
+  open: boolean;
+  onClose: () => void;
+  canChangeName: boolean;
+}
 
 export function AccountSettingsModal({
   open,
   onClose,
   canChangeName,
-}: {
-  open: boolean;
-  onClose: () => void;
-  canChangeName: boolean;
-}) {
+}: AccountSettingsModalProps) {
   const { account, logout } = useAuth();
   const { push } = useToast();
+
   const [newName, setNewName] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -29,12 +31,28 @@ export function AccountSettingsModal({
   const [showDeleteSection, setShowDeleteSection] = useState(false);
   const [checkingOwnerCount, setCheckingOwnerCount] = useState(false);
   const [isLastOwner, setIsLastOwner] = useState(true);
+
   const [deleteCurrentPassword, setDeleteCurrentPassword] = useState("");
   const [transferName, setTransferName] = useState("");
   const [transferNumber, setTransferNumber] = useState("");
   const [transferPassword, setTransferPassword] = useState("");
   const [transferConfirmPassword, setTransferConfirmPassword] = useState("");
   const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setNewName("");
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setShowDeleteSection(false);
+      setDeleteCurrentPassword("");
+      setTransferName("");
+      setTransferNumber("");
+      setTransferPassword("");
+      setTransferConfirmPassword("");
+    }
+  }, [open]);
 
   const handleSaveName = async () => {
     if (!newName.trim()) return;
@@ -57,14 +75,11 @@ export function AccountSettingsModal({
       push("error", "Wachtwoorden komen niet overeen.");
       return;
     }
-    if (newPassword.length < 8 || newPassword.length > 15) {
-      push("error", "Wachtwoord moet 8 tot 15 tekens lang zijn.");
+    if (newPassword.length < 8) {
+      push("error", "Wachtwoord moet minimaal 8 tekens lang zijn.");
       return;
     }
-    if (!/^[A-Za-z0-9]+$/.test(newPassword)) {
-      push("error", "Wachtwoord mag alleen letters en cijfers bevatten.");
-      return;
-    }
+
     setSavingPassword(true);
     try {
       await api.changePassword(currentPassword, newPassword);
@@ -86,7 +101,8 @@ export function AccountSettingsModal({
       const res = await api.ownerCount();
       setIsLastOwner(res.count <= 1);
       setShowDeleteSection(true);
-    } catch {
+    } catch (err) {
+      // Fallback
       setIsLastOwner(true);
       setShowDeleteSection(true);
     } finally {
@@ -125,26 +141,28 @@ export function AccountSettingsModal({
               newOwnerNumber: transferNumber.trim(),
               newOwnerPassword: transferPassword,
             }
-          : {})
+          : {}),
       });
 
       if (res.ok) {
         push("success", isLastOwner ? "Nieuwe eigenaar ingesteld en oud account verwijderd." : "Account verwijderd.");
         onClose();
         await logout();
-      } else if (res.requiresNewOwner) {
-        push("error", "Je bent de laatste eigenaar. Vul de gegevens voor een nieuwe eigenaar in.");
-        setIsLastOwner(true);
       }
     } catch (err) {
-      push("error", err instanceof Error ? err.message : "Fout bij verwijderen van account.");
+      if (err instanceof Error && err.message.includes("laatste eigenaar")) {
+        push("error", "Je bent de laatste eigenaar. Vul de gegevens voor een nieuwe eigenaar in.");
+        setIsLastOwner(true);
+      } else {
+        push("error", err instanceof Error ? err.message : "Fout bij verwijderen van account.");
+      }
     } finally {
       setDeleting(false);
     }
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Accountinstellingen" size="md">
+    <Modal open={open} onClose={onClose} title="Account Instellingen">
       <div className="space-y-6">
         {canChangeName && (
           <div>
@@ -152,14 +170,17 @@ export function AccountSettingsModal({
             <div className="flex gap-2">
               <input
                 type="text"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
                 className="input"
                 placeholder="Nieuwe naam"
-                maxLength={80}
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
               />
-              <button onClick={handleSaveName} disabled={savingName || !newName.trim()} className="btn-primary flex-shrink-0">
-                {savingName ? <Spinner /> : <Save className="h-4 w-4" />}
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={handleSaveName}
+                disabled={savingName || !newName.trim()}
+              >
                 Opslaan
               </button>
             </div>
@@ -168,31 +189,34 @@ export function AccountSettingsModal({
 
         <div>
           <h3 className="text-sm font-semibold text-ink-900 mb-1">Wachtwoord wijzigen</h3>
-          <p className="text-xs text-ink-400 mb-3">8-15 tekens, alleen letters en cijfers.</p>
+          <p className="text-xs text-ink-400 mb-3">Minimaal 8 tekens.</p>
           <form onSubmit={handleChangePassword} className="space-y-3">
             <PasswordField
               label="Huidig wachtwoord"
-              value={currentPassword}
-              onChange={setCurrentPassword}
               autoComplete="current-password"
               required
+              value={currentPassword}
+              onChange={setCurrentPassword}
             />
             <PasswordField
               label="Nieuw wachtwoord"
-              value={newPassword}
-              onChange={setNewPassword}
               autoComplete="new-password"
               required
+              value={newPassword}
+              onChange={setNewPassword}
             />
             <PasswordField
               label="Herhaal nieuw wachtwoord"
-              value={confirmPassword}
-              onChange={setConfirmPassword}
               autoComplete="new-password"
               required
+              value={confirmPassword}
+              onChange={setConfirmPassword}
             />
-            <button type="submit" disabled={savingPassword} className="btn-primary w-full">
-              {savingPassword ? <Spinner /> : <KeyRound className="h-4 w-4" />}
+            <button
+              type="submit"
+              className="btn-primary w-full"
+              disabled={savingPassword || !currentPassword || !newPassword || !confirmPassword}
+            >
               Wachtwoord wijzigen
             </button>
           </form>
@@ -210,22 +234,22 @@ export function AccountSettingsModal({
             {!showDeleteSection ? (
               <button
                 type="button"
+                className="btn-danger w-full text-xs"
                 onClick={handleOpenDeleteSection}
                 disabled={checkingOwnerCount}
-                className="btn-danger w-full text-xs"
               >
-                {checkingOwnerCount ? <Spinner /> : <Trash2 className="h-4 w-4" />}
                 Eigenaar account verwijderen
               </button>
             ) : (
-              <form onSubmit={handleDeleteAccount} className="p-4 rounded-lg bg-danger-50 border border-danger-200 space-y-3">
+              <form onSubmit={handleDeleteAccount} className="space-y-3 bg-danger-50/50 p-4 rounded-xl border border-danger-100">
                 <PasswordField
                   label="Uw huidige wachtwoord (ter bevestiging)"
-                  value={deleteCurrentPassword}
-                  onChange={setDeleteCurrentPassword}
                   autoComplete="current-password"
                   required
+                  value={deleteCurrentPassword}
+                  onChange={setDeleteCurrentPassword}
                 />
+
                 {isLastOwner ? (
                   <>
                     <div className="flex items-start gap-2 text-danger-800 text-xs font-medium">
@@ -234,45 +258,41 @@ export function AccountSettingsModal({
                         Je kunt het laatste eigenaar-account niet verwijderen zonder eerst een nieuwe eigenaar aan te maken. Vul hieronder de gegevens van de nieuwe eigenaar in:
                       </span>
                     </div>
-
                     <div>
                       <label className="label text-xs">Naam nieuwe eigenaar</label>
                       <input
                         type="text"
-                        value={transferName}
-                        onChange={(e) => setTransferName(e.target.value)}
                         className="input text-xs"
                         placeholder="bijv. Jan de Vries"
                         required
+                        value={transferName}
+                        onChange={(e) => setTransferName(e.target.value)}
                       />
                     </div>
-
                     <div>
                       <label className="label text-xs">Eigenaarnummer nieuwe eigenaar</label>
                       <input
                         type="text"
-                        value={transferNumber}
-                        onChange={(e) => setTransferNumber(e.target.value)}
                         className="input text-xs"
                         placeholder="bijv. 8900002"
                         required
+                        value={transferNumber}
+                        onChange={(e) => setTransferNumber(e.target.value)}
                       />
                     </div>
-
                     <PasswordField
                       label="Wachtwoord nieuwe eigenaar"
+                      autoComplete="new-password"
+                      required
                       value={transferPassword}
                       onChange={setTransferPassword}
-                      autoComplete="new-password"
-                      required
                     />
-
                     <PasswordField
                       label="Herhaal wachtwoord nieuwe eigenaar"
-                      value={transferConfirmPassword}
-                      onChange={setTransferConfirmPassword}
                       autoComplete="new-password"
                       required
+                      value={transferConfirmPassword}
+                      onChange={setTransferConfirmPassword}
                     />
                   </>
                 ) : (
@@ -284,18 +304,18 @@ export function AccountSettingsModal({
                 <div className="flex gap-2 pt-2">
                   <button
                     type="button"
-                    onClick={() => setShowDeleteSection(false)}
                     className="btn-secondary w-1/2 text-xs"
+                    onClick={() => setShowDeleteSection(false)}
+                    disabled={deleting}
                   >
                     Annuleren
                   </button>
                   <button
                     type="submit"
-                    disabled={deleting}
                     className="btn-danger w-1/2 text-xs"
+                    disabled={deleting || !deleteCurrentPassword}
                   >
-                    {deleting ? <Spinner /> : <UserPlus className="h-4 w-4" />}
-                    {isLastOwner ? "Overdragen & Verwijderen" : "Account Verwijderen"}
+                    Definitief verwijderen
                   </button>
                 </div>
               </form>

@@ -11,7 +11,7 @@ import { CustomerCommunicationsTab } from "@/components/CustomerCommunicationsTa
 import {
   Upload, History, Settings as SettingsIcon, FileText, FileImage, FileType,
   CheckCircle2, ShieldCheck, ScrollText, AlertCircle, Save, User as UserIcon,
-  Archive, Mail, StickyNote, Globe, Paperclip
+  Archive, Mail, StickyNote, Globe, Paperclip, Download, Eye
 } from "lucide-react";
 
 type Tab = "upload" | "history" | "archive" | "communications" | "notes" | "profile" | "settings";
@@ -436,6 +436,29 @@ function UploadTab({ onUploaded }: { onUploaded: () => void }) {
 }
 
 function HistoryTab({ files, onRefresh }: { files: FileRow[]; onRefresh: () => void }) {
+  const { push } = useToast();
+
+  const handleDownload = async (fileId: string, originalName: string) => {
+    try {
+      const res = await api.userFileDownload(fileId);
+      const a = document.createElement("a");
+      a.href = res.url;
+      a.download = originalName;
+      a.click();
+    } catch {
+      push("error", "Downloaden mislukt.");
+    }
+  };
+
+  const handleView = async (fileId: string) => {
+    try {
+      const res = await api.userFileView(fileId);
+      window.open(res.url, "_blank");
+    } catch {
+      push("error", "Weergeven mislukt.");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader title="Uploadgeschiedenis" subtitle="Uw geüploade bestanden" action={
@@ -455,9 +478,19 @@ function HistoryTab({ files, onRefresh }: { files: FileRow[]; onRefresh: () => v
                     <p className="text-xs text-ink-400">{formatBytes(f.size_bytes)} · {formatDateTime(f.created_at)}</p>
                   </div>
                 </div>
-                <div className="text-right flex-shrink-0">
-                  <p className="text-xs text-ink-400">Verloopt op</p>
-                  <p className="text-xs font-medium text-ink-600">{formatDate(f.expires_at)}</p>
+                <div className="flex items-center gap-4 flex-shrink-0">
+                  <div className="text-right hidden sm:block">
+                    <p className="text-xs text-ink-400">Verloopt op</p>
+                    <p className="text-xs font-medium text-ink-600">{formatDate(f.expires_at)}</p>
+                  </div>
+                  <div className="flex gap-1">
+                    <button onClick={() => handleView(f.id)} className="p-2 text-ink-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors" title="Weergeven">
+                      <Eye className="h-4 w-4" />
+                    </button>
+                    <button onClick={() => handleDownload(f.id, f.original_name)} className="p-2 text-ink-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors" title="Downloaden">
+                      <Download className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}

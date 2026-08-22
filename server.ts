@@ -1916,7 +1916,7 @@ async function startServer() {
     }
     const { data: signedUrl, error: signedUrlError } = await supabase.storage
       .from("customer-files")
-      .createSignedUrl(fileRecord.storage_path, 60);
+      .createSignedUrl(fileRecord.storage_path, 60, { download: fileRecord.original_name });
     if (signedUrlError) {
       return res.status(500).json({ error: "Kon bestand niet downloaden." });
     }
@@ -2397,7 +2397,7 @@ async function startServer() {
         return res.status(404).json({ error: "Bestand niet gevonden." });
       const { data: signedUrl, error: signedUrlError } = await supabase.storage
         .from("archive-files")
-        .createSignedUrl(record.storage_path, 60);
+        .createSignedUrl(record.storage_path, 60, { download: record.name });
       if (signedUrlError || !signedUrl?.signedUrl) {
         return res.json({ url: "#", name: record.name });
       }
@@ -2422,7 +2422,7 @@ async function startServer() {
         return res.status(404).json({ error: "Bestand niet gevonden." });
       const { data: signedUrl, error: signedUrlError } = await supabase.storage
         .from("archive-files")
-        .createSignedUrl(record.storage_path, 60);
+        .createSignedUrl(record.storage_path, 60, { download: record.name });
       if (signedUrlError || !signedUrl?.signedUrl) {
         return res.json({ url: "#", name: record.name });
       }
