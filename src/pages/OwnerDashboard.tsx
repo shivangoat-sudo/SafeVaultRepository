@@ -204,6 +204,7 @@ export function OwnerDashboard() {
                 blockedCount: blocked.length,
                 totalStorageBytes: 0,
                 fileCount: 0,
+                users: [],
               }}
               loading={statsLoading}
               error={statsError}
