@@ -1,15 +1,24 @@
 [build]
   command = "npm run build"
+  # De map waar Vite de frontend-bundel (HTML/CSS/JS) genereert
   publish = "dist"
 
 [functions]
+  # Gebruik esbuild voor serverless functies zodat TypeScript en ES-Modules goed compileren
+  node_bundler = "esbuild"
+  
+  # Voorkom dat dev-only bundlers/modules onnodig worden meegenomen in de backend zip
   external_node_modules = ["vite", "lightningcss", "esbuild"]
 
+# Redirect 1: Backend
+# Stuur al het verkeer dat met /api/ begint door naar de Express serverless functie
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api/:splat"
   status = 200
 
+# Redirect 2: Frontend (Single Page Application)
+# Stuur alle overige routes (bijv. /dashboard, /login) door naar de React frontend
 [[redirects]]
   from = "/*"
   to = "/index.html"
