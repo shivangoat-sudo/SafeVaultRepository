@@ -129,11 +129,6 @@ export const api = {
     const res = await request<{ initialized: boolean }>("/auth/setup-status");
     return res;
   },
-  setup: (name: string) =>
-    request<{ account: { number: string; name: string; role: string }; tempPassword: string }>("/auth/setup", {
-      method: "POST",
-      body: JSON.stringify({ name }),
-    }),
   systemInit: (name: string, number: string, password: string) =>
     request<LoginResponse & { ok: boolean }>("/auth/system-init", {
       method: "POST",
@@ -544,23 +539,6 @@ export const api = {
   accountingListInvoices: (companyId: string) =>
     request<{ invoices: unknown[] }>(`/accounting/invoices?companyId=${companyId}`),
 
-  accountingGetVatReturn: (companyId: string, year: number, quarter?: string) =>
-    request<{ vatReturn: {
-      period: string;
-      year: number;
-      quarter: string | null;
-      turnover21: number;
-      vat21: number;
-      turnover9: number;
-      vat9: number;
-      inputVat: number;
-      amountPayable: number;
-      amountRefundable: number;
-      status?: string;
-    } }>(`/accounting/vat-return?companyId=${companyId}&year=${year}${quarter ? `&quarter=${quarter}` : ""}`),
-
-  accountingSaveVatReturn: (data: { companyId: string; period: string; year: number; quarter?: string; status?: string }) =>
-    request<{ vatReturn: unknown }>("/accounting/vat-return", { method: "POST", body: JSON.stringify(data) }),
 
   accountingGetLedger: (companyId: string) =>
     request<{ entries: unknown[]; totals: { totalDebit: number; totalCredit: number; balanced: boolean } }>(

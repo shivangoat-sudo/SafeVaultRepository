@@ -33,12 +33,10 @@ export function LoginPage() {
   useEffect(() => {
     api.setupStatus()
       .then((r) => {
-        // If initialized is false, then needsSetup is true. Otherwise false.
         setNeedsSetup(!r.initialized);
       })
-      .catch(() => {
-        // Default to false (already initialized) so owner is never locked out or forced to re-init
-        setNeedsSetup(false);
+      .catch((err) => {
+        setError(err.message || "Kan systeemstatus niet ophalen.");
       });
   }, []);
 

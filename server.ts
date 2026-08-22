@@ -12,17 +12,8 @@ import QRCode from "qrcode";
 import { supabase } from "./src/server/lib/supabase.js";
 
 // Safely import createRequire for development
-import { createRequire } from "module";
-
 // In production, we don't need Vite's dev server, so we can mock/avoid require("vite")
-const getVite = () => {
-  if (process.env.NODE_ENV !== "production") {
-    // This is only called in dev, so require is safe here
-    const require = createRequire(import.meta.url);
-    return require("vite");
-  }
-  return null;
-};
+// We will dynamically import vite where needed.
 
 // Inside startServer, update logic
 import {
@@ -87,6 +78,14 @@ async function startServer() {
   const PORT = 3000;
   
   app.use(express.json());
+
+  // Bulletproof Netlify path normalization
+  app.use((req, res, next) => {
+    if (req.url && req.url.startsWith('/.netlify/functions/api/')) {
+      req.url = req.url.replace('/.netlify/functions/api/', '/api/');
+    }
+    next();
+  });
 
   // Registration of critical routes must happen before any potential blocking operations
   
@@ -386,7 +385,7 @@ async function startServer() {
     if (!reqUser) return false;
     if (reqUser.role === "owner") return true;
     const { data: note } = await supabase
-      .from("user_notes")
+      .from("notes")
       .select("customer_id")
       .eq("id", noteId)
       .single();
@@ -1186,7 +1185,7 @@ async function startServer() {
 
     if (user.role === "customer") {
       const { data, error: queryError } = await supabase
-        .from("user_notes")
+        .from("notes")
         .select("*")
         .eq("customer_id", customerId)
         .eq("visible_to_customer", true)
@@ -1194,7 +1193,7 @@ async function startServer() {
       if (queryError) {
         if (queryError.code === "42703" || queryError.code === "PGRST204") {
           const { data: fallbackData, error: fallbackError } = await supabase
-            .from("user_notes")
+            .from("notes")
             .select("*")
             .eq("customer_id", customerId)
             .order("created_at", { ascending: false });
@@ -1209,7 +1208,7 @@ async function startServer() {
       }
     } else {
       const { data, error: queryError } = await supabase
-        .from("user_notes")
+        .from("notes")
         .select("*")
         .eq("customer_id", customerId)
         .order("created_at", { ascending: false });
@@ -1278,14 +1277,14 @@ async function startServer() {
     }
 
     let { data: note, error } = await supabase
-      .from("user_notes")
+      .from("notes")
       .insert(insertData)
       .select()
       .single();
     if (error && (error.code === "42703" || error.code === "PGRST204")) {
       delete insertData.visible_to_customer;
       const retryRes = await supabase
-        .from("user_notes")
+        .from("notes")
         .insert(insertData)
         .select()
         .single();
@@ -1345,7 +1344,7 @@ async function startServer() {
 
     // Check if existing note has an archive_folder_id to preserve it
     const { data: existingNote } = await supabase
-      .from("user_notes")
+      .from("notes")
       .select("body")
       .eq("id", noteId)
       .single();
@@ -1372,7 +1371,7 @@ async function startServer() {
     }
 
     let { data: note, error } = await supabase
-      .from("user_notes")
+      .from("notes")
       .update(updateData)
       .eq("id", noteId)
       .select()
@@ -1380,7 +1379,7 @@ async function startServer() {
     if (error && (error.code === "42703" || error.code === "PGRST204")) {
       delete updateData.visible_to_customer;
       const retryRes = await supabase
-        .from("user_notes")
+        .from("notes")
         .update(updateData)
         .eq("id", noteId)
         .select()
@@ -1442,7 +1441,7 @@ async function startServer() {
 
       // Fetch note
       const { data: note, error: noteErr } = await supabase
-        .from("user_notes")
+        .from("notes")
         .select("*")
         .eq("id", noteId)
         .single();
@@ -1474,7 +1473,7 @@ async function startServer() {
 
       // Perform atomic update
       const { data: updatedNote, error: updateErr } = await supabase
-        .from("user_notes")
+        .from("notes")
         .update({
           body: updatedBody,
           updated_at: new Date().toISOString(),
@@ -1521,7 +1520,7 @@ async function startServer() {
 
       // Fetch note
       const { data: note, error: noteErr } = await supabase
-        .from("user_notes")
+        .from("notes")
         .select("*")
         .eq("id", noteId)
         .single();
@@ -1542,7 +1541,7 @@ async function startServer() {
 
       // Perform atomic update
       const { data: updatedNote, error: updateErr } = await supabase
-        .from("user_notes")
+        .from("notes")
         .update({
           body: updatedBody,
           updated_at: new Date().toISOString(),
@@ -1584,7 +1583,7 @@ async function startServer() {
       return res.status(404).json({ error: "Notitie niet gevonden." });
     }
     const { error } = await supabase
-      .from("user_notes")
+      .from("notes")
       .delete()
       .eq("id", noteId);
     if (error) return res.status(500).json({ error: error.message });
@@ -2090,7 +2089,7 @@ async function startServer() {
       foldersQuery,
       filesQuery,
       supabase
-        .from("user_notes")
+        .from("notes")
         .select("*")
         .eq("customer_id", customerId)
         .order("created_at", { ascending: false }),
@@ -2161,7 +2160,7 @@ async function startServer() {
       foldersQuery,
       filesQuery,
       supabase
-        .from("user_notes")
+        .from("notes")
         .select("*")
         .eq("customer_id", user.id)
         .eq("visible_to_customer", true)
@@ -2296,14 +2295,14 @@ async function startServer() {
 
         // Detach any notes linked to this folder
         const { data: notesInFolder } = await supabase
-          .from("user_notes")
+          .from("notes")
           .select("id, body")
           .ilike("body", `%[archive_folder:${fId}]%`);
         if (notesInFolder && notesInFolder.length > 0) {
           for (const n of notesInFolder) {
             const { attachments, cleanBody } = extractFolderAndAttachmentsFromBody(n.body || "");
             const restoredBody = injectFolderAndAttachmentsIntoBody(cleanBody, attachments, null);
-            await supabase.from("user_notes").update({ body: restoredBody }).eq("id", n.id);
+            await supabase.from("notes").update({ body: restoredBody }).eq("id", n.id);
           }
         }
 
@@ -4200,7 +4199,7 @@ ${finalBody}`,
       } catch (e) {}
       try {
         await supabase
-          .from("user_notes")
+          .from("notes")
           .delete()
           .or(`user_id.eq.${tid},account_id.eq.${tid}`);
       } catch (e) {}
@@ -5972,7 +5971,7 @@ ${finalBody}`,
       return res.status(403).json({ error: "Geen toegang" });
     }
     const { data: list } = await supabase
-      .from("transfers")
+      .from("transfer_requests")
       .select("*")
       .or(
         `sender_user_id.eq.${req.user.id},receiver_user_id.eq.${req.user.id}`,
@@ -6075,7 +6074,7 @@ ${finalBody}`,
         });
     }
     const { data: request, error: insErr } = await supabase
-      .from("transfers")
+      .from("transfer_requests")
       .insert({
         sender_user_id: req.user.id,
         receiver_user_id: receiverUserId,
@@ -6094,7 +6093,7 @@ ${finalBody}`,
     const { id } = req.params;
     const { action } = req.body;
     const { data: request } = await supabase
-      .from("transfers")
+      .from("transfer_requests")
       .select("*")
       .eq("id", id)
       .single();
@@ -6110,7 +6109,7 @@ ${finalBody}`,
           .json({ error: "Alleen de verzender kan dit verzoek annuleren." });
       }
       await supabase
-        .from("transfers")
+        .from("transfer_requests")
         .update({ status: "cancelled", updated_at: new Date().toISOString() })
         .eq("id", id);
       return res.json({ ok: true });
@@ -6122,7 +6121,7 @@ ${finalBody}`,
           .json({ error: "Alleen de ontvanger kan dit verzoek goedkeuren." });
       }
       await supabase
-        .from("transfers")
+        .from("transfer_requests")
         .update({
           status: "pending_customer",
           updated_at: new Date().toISOString(),
@@ -6137,7 +6136,7 @@ ${finalBody}`,
           .json({ error: "Alleen de ontvanger kan dit verzoek afwijzen." });
       }
       await supabase
-        .from("transfers")
+        .from("transfer_requests")
         .update({
           status: "declined_receiver",
           updated_at: new Date().toISOString(),
@@ -6152,7 +6151,7 @@ ${finalBody}`,
       return res.status(403).json({ error: "Geen toegang" });
     }
     const { data: list } = await supabase
-      .from("transfers")
+      .from("transfer_requests")
       .select("*")
       .eq("customer_id", req.user.id)
       .eq("status", "pending_customer");
@@ -6194,7 +6193,7 @@ ${finalBody}`,
       const { id } = req.params;
       const { action } = req.body;
       const { data: request } = await supabase
-        .from("transfers")
+        .from("transfer_requests")
         .select("*")
         .eq("id", id)
         .single();
@@ -6209,7 +6208,7 @@ ${finalBody}`,
       }
       if (action === "decline") {
         await supabase
-          .from("transfers")
+          .from("transfer_requests")
           .update({
             status: "declined_customer",
             updated_at: new Date().toISOString(),
@@ -6267,7 +6266,7 @@ ${finalBody}`,
             });
         }
         await supabase
-          .from("transfers")
+          .from("transfer_requests")
           .update({ status: "completed", updated_at: new Date().toISOString() })
           .eq("id", id);
         return res.json({ ok: true });
@@ -6279,7 +6278,7 @@ ${finalBody}`,
     res.status(404).json({ error: "Route niet gevonden." });
   });
   if (process.env.NODE_ENV !== "production") {
-    const { createServer: createViteServer } = getVite();
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
