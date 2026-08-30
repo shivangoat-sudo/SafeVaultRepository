@@ -101,7 +101,8 @@ export type ClassificationSource =
   | 'standaard_geen_uitzondering'   // geen enkele reden gevonden om af te wijken van het standaardtarief -> standaardtarief geldt met vertrouwen (GEEN twijfelgeval)
   | 'conflict_gedetecteerd'         // tegenstrijdige signalen (bv. Nederlandse rechtsvorm + buitenlands rekeningnummer + claim van verlegde BTW) -> échte twijfel
   | 'handmatig'                     // expliciete volledige override door de gebruiker (classifications-map)
-  | 'handmatig_percentage';         // boekhouder heeft, als laatste redmiddel, alleen het BTW-percentage aangewezen (percentageOverrides)
+  | 'handmatig_percentage'         // boekhouder heeft, als laatste redmiddel, alleen het BTW-percentage aangewezen (percentageOverrides)
+  | 'twijfel_onvoldoende_informatie'; // onvoldoende informatie; nooit als automatische fiscale conclusie gebruiken
 
 export type Zekerheid = 'hoog' | 'gemiddeld' | 'laag';
 
@@ -974,11 +975,11 @@ export function autoClassify(
     // 1968 is de standaardregel, geen noodgreep).
     return {
       classification: 'kosten_algemeen_21',
-      herkend: true,
+      herkend: false,
       herkenningsbron:
-        'Geen leverancier, trefwoord, categorie of IBAN-signaal wijst op een verlaagd tarief, vrijstelling of verlegging — het algemene tarief van 21% is dan het fiscaal juiste standaardantwoord.',
-      bron: 'standaard_geen_uitzondering',
-      zekerheid: 'hoog',
+        'Onvoldoende fiscale informatie om deze uitgave betrouwbaar te classificeren. De engine gokt niet op 21%; deze transactie moet handmatig worden beoordeeld.',
+      bron: 'twijfel_onvoldoende_informatie',
+      zekerheid: 'laag',
     };
   }
 
@@ -1005,11 +1006,11 @@ export function autoClassify(
   // het algemene tarief gevonden -> dat tarief geldt met vertrouwen.
   return {
     classification: 'omzet_algemeen_21',
-    herkend: true,
+    herkend: false,
     herkenningsbron:
-      'Geen trefwoord of categorie wijst op een verlaagd tarief of vrijstelling — het algemene tarief van 21% is dan het fiscaal juiste standaardantwoord voor binnenlandse B2B-dienstverlening.',
-    bron: 'standaard_geen_uitzondering',
-    zekerheid: 'hoog',
+      'Onvoldoende fiscale informatie om deze ontvangst betrouwbaar te classificeren. De engine gokt niet op 21%; deze transactie moet handmatig worden beoordeeld.',
+    bron: 'twijfel_onvoldoende_informatie',
+    zekerheid: 'laag',
   };
 }
 
@@ -1443,8 +1444,8 @@ export function calculateVatReport(
     }
 
     // Alle lagen (regels, memo, gecombineerde signalen, brede categorieën, AI)
-    // zijn doorzocht en er is geen boekhouder-override — pas nu wordt de
-    // veilige standaard toegepast.
+    // zijn doorzocht en er is geen boekhouder-override. De transactie blijft
+    // een twijfelgeval en mag niet financieel worden meegenomen.
     return processTransaction(tx, auto.classification, false, auto.herkenningsbron, auto.bron, auto.zekerheid);
   });
 
@@ -1470,6 +1471,9 @@ export function calculateVatReport(
       automatisch_herkend += 1;
     } else {
       controle_aanbevolen.push(p);
+      // SAFETY: unresolved classifications are never fiscal conclusions.
+      // They remain visible for review but cannot alter any financial total.
+      continue;
     }
 
     if (p.classification === 'verlegd_21') {
@@ -1617,6 +1621,12 @@ function auditReport(
     }
   }
 
+  const financieelMeegeteld = processed.filter((t) => t.herkend).length;
+  const onopgelost = processed.filter((t) => !t.herkend).length;
+  if (financieelMeegeteld + onopgelost !== processed.length) {
+    problemen.push(`Regelaantal-controle faalt: meegeteld (${financieelMeegeteld}) + onopgelost (${onopgelost}) != verwerkt (${processed.length}).`);
+  }
+
   // Controle 1 (aggregaat): Totaal incl. 21% − Totaal excl. 21% − Totale BTW 21% = 0.
   if (!approxEqual(totals.totaal_incl_21 - totals.totaal_excl_21 - totals.totale_btw_21, 0)) {
     problemen.push(
@@ -1636,11 +1646,11 @@ function auditReport(
   // "verschil" dat puur door de afrondingsmethode zelf komt.
   const herberekend_btw_21 = round2(
     processed
-      .filter((t) => t.rate === 21 && t.classification !== 'verlegd_21')
+      .filter((t) => t.herkend && t.rate === 21 && t.classification !== 'verlegd_21')
       .reduce((sum, t) => sum + t._btw_bedrag_precisie, 0)
   );
   const herberekend_btw_9 = round2(
-    processed.filter((t) => t.rate === 9).reduce((sum, t) => sum + t._btw_bedrag_precisie, 0)
+    processed.filter((t) => t.herkend && t.rate === 9).reduce((sum, t) => sum + t._btw_bedrag_precisie, 0)
   );
 
   if (!approxEqual(herberekend_btw_21, totals.totale_btw_21)) {
