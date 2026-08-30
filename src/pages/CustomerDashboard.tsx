@@ -8,10 +8,12 @@ import type { FileRow, Notification, ProfileData, UserNote } from "@/types";
 import { processFiles } from "@/bridge";
 import { CustomerArchiveTab } from "@/components/CustomerArchiveTab";
 import { CustomerCommunicationsTab } from "@/components/CustomerCommunicationsTab";
+import { NoteAttachmentModal, type NoteAttachmentTarget } from "@/components/NoteAttachmentModal";
+import { Modal } from "@/components/Modal";
 import {
   Upload, History, Settings as SettingsIcon, FileText, FileImage, FileType,
   CheckCircle2, ShieldCheck, ScrollText, AlertCircle, Save, User as UserIcon,
-  Archive, Mail, StickyNote, Globe, Paperclip, Download, Eye
+  Archive, Mail, StickyNote, Globe, Paperclip, Download, Eye, Plus, Trash2, Edit3, X, Loader2
 } from "lucide-react";
 
 type Tab = "upload" | "history" | "archive" | "communications" | "notes" | "profile" | "settings";
@@ -533,9 +535,6 @@ function NotificationsPanel({ open, onClose, notifications, onRead }: {
   );
 }
 
-// Modal import
-import { Modal } from "@/components/Modal";
-
 function PurgeNoticeModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   if (!open) return null;
   return (
@@ -624,36 +623,155 @@ function CustomerNotesTab() {
   const [notes, setNotes] = useState<UserNote[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Form / Modal states
+  const [showModal, setShowModal] = useState(false);
+  const [editingNote, setEditingNote] = useState<UserNote | null>(null);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [attachments, setAttachments] = useState<Array<{ filePath: string; fileName: string; fileSize: number; mimeType: string }>>([]);
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [viewAttachmentTarget, setViewAttachmentTarget] = useState<NoteAttachmentTarget>(null);
+
   const loadNotes = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api.dossierNotes("self");
-      setNotes(res.notes);
+      setNotes(res.notes || []);
     } catch {
       push("error", "Notities konden niet worden geladen.");
     } finally {
       setLoading(false);
     }
-  }, [push]);
+  }, []);
 
   useEffect(() => {
     loadNotes();
   }, [loadNotes]);
 
-  const handleViewAttachment = async (filePath: string) => {
-    try {
-      const res = await api.dossierNoteAttachmentView(filePath);
-      window.open(res.url, "_blank");
-    } catch {
-      push("error", "Bijlage kon niet worden geopend.");
+  const handleOpenCreate = () => {
+    setEditingNote(null);
+    setTitle("");
+    setBody("");
+    setAttachments([]);
+    setShowModal(true);
+  };
+
+  const handleOpenEdit = (note: UserNote) => {
+    setEditingNote(note);
+    setTitle(note.title || "");
+    setBody(note.body || "");
+    const initialAtts = (note.attachments || []).map((a: any) => ({
+      filePath: a.file_path || a.filePath,
+      fileName: a.file_name || a.fileName,
+      fileSize: a.file_size || a.fileSize,
+      mimeType: a.mime_type || a.mimeType,
+    }));
+    if (initialAtts.length === 0 && note.file_path) {
+      initialAtts.push({
+        filePath: note.file_path,
+        fileName: note.file_name || "Bijlage",
+        fileSize: note.file_size || 0,
+        mimeType: note.mime_type || "application/octet-stream",
+      });
     }
+    setAttachments(initialAtts);
+    setShowModal(true);
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const formData = new FormData();
+        formData.append("file", files[i]);
+        const res = await api.dossierUploadNoteAttachment("self", formData);
+        setAttachments((prev) => [...prev, res]);
+      }
+      push("success", "Bijlage(n) geüpload.");
+    } catch (err) {
+      push("error", err instanceof Error ? err.message : "Upload mislukt.");
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  };
+
+  const handleRemoveAttachment = (idx: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleSave = async () => {
+    if (!title.trim() && !body.trim() && attachments.length === 0) {
+      push("error", "Vul ten minste een titel, notitie of bijlage in.");
+      return;
+    }
+    setSaving(true);
+    try {
+      if (editingNote) {
+        await api.dossierUpdateNote(
+          editingNote.id,
+          title.trim(),
+          body.trim(),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          attachments
+        );
+        push("success", "Notitie bijgewerkt.");
+      } else {
+        await api.dossierSaveNote(
+          "self",
+          title.trim(),
+          body.trim(),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          attachments
+        );
+        push("success", "Notitie aangemaakt.");
+      }
+      setShowModal(false);
+      loadNotes();
+    } catch (err) {
+      push("error", err instanceof Error ? err.message : "Opslaan mislukt.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (noteId: string) => {
+    if (!window.confirm("Weet u zeker dat u deze notitie wilt verwijderen?")) return;
+    try {
+      await api.dossierDeleteNote(noteId);
+      push("success", "Notitie verwijderd.");
+      loadNotes();
+    } catch {
+      push("error", "Verwijderen mislukt.");
+    }
+  };
+
+  const handleViewAttachment = (filePath: string, fileName?: string, fileSize?: number) => {
+    setViewAttachmentTarget({ filePath, fileName, fileSize });
   };
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Gedeelde notities"
-        subtitle="Notities en toelichtingen die door uw boekhouder met u zijn gedeeld"
+        title="Notities & Toelichtingen"
+        subtitle="Notities en toelichtingen in uw dossier"
+        action={
+          <button onClick={handleOpenCreate} className="btn-primary text-xs">
+            <Plus className="h-3.5 w-3.5 mr-1.5" />
+            Nieuwe Notitie
+          </button>
+        }
       />
 
       {loading ? (
@@ -661,67 +779,184 @@ function CustomerNotesTab() {
           <Spinner className="h-6 w-6 text-brand-600" />
         </div>
       ) : notes.length === 0 ? (
-        <div className="card p-8">
+        <div className="card p-8 text-center">
           <EmptyState
             icon={StickyNote}
-            title="Geen gedeelde notities"
-            subtitle="Uw boekhouder heeft op dit moment geen notities met u gedeeld."
+            title="Geen notities"
+            subtitle="Er zijn nog geen notities in uw dossier."
           />
+          <button onClick={handleOpenCreate} className="btn-primary text-xs mt-4">
+            <Plus className="h-3.5 w-3.5 mr-1.5" />
+            Plaats een notitie
+          </button>
         </div>
       ) : (
         <div className="space-y-4 max-w-3xl">
-          {notes.map((n) => (
-            <div key={n.id} className="card p-5 border border-ink-150 shadow-sm hover:shadow-md transition-shadow">
-              <div className="flex items-start justify-between gap-3 flex-wrap sm:flex-nowrap">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap mb-1.5">
-                    {n.title ? (
-                      <h3 className="text-base font-semibold text-ink-900">{n.title}</h3>
-                    ) : (
-                      <h3 className="text-base font-medium text-ink-500 italic">Naamloze notitie</h3>
-                    )}
-                    <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-medium text-brand-700 border border-brand-200">
-                      <Globe className="h-3 w-3" /> Gedeeld met u
-                    </span>
-                  </div>
-                  
-                  {n.body && (
-                    <p className="text-sm text-ink-700 whitespace-pre-wrap mt-2 leading-relaxed bg-ink-50/20 p-3.5 rounded-lg border border-ink-100">
-                      {n.body}
-                    </p>
-                  )}
+          {notes.map((n) => {
+            const attList = (n.attachments && n.attachments.length > 0)
+              ? n.attachments
+              : n.file_path
+              ? [{ file_path: n.file_path, file_name: n.file_name, file_size: n.file_size, mime_type: n.mime_type }]
+              : [];
 
-                  {n.file_path && (
-                    <div className="mt-4 flex items-center justify-between gap-4 p-3 bg-brand-50/50 hover:bg-brand-50 border border-brand-100 rounded-xl text-sm max-w-lg transition-colors">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <Paperclip className="h-4 w-4 text-brand-600 flex-shrink-0" />
-                        <span className="font-semibold text-ink-800 truncate" title={n.file_name ?? ""}>
-                          {n.file_name || "Bijlage"}
-                        </span>
-                        {n.file_size && (
-                          <span className="text-xs text-ink-400 font-mono flex-shrink-0">
-                            ({formatBytes(n.file_size)})
-                          </span>
+            return (
+              <div key={n.id} className="card p-5 border border-ink-150 shadow-sm hover:shadow-md transition-shadow">
+                <div className="flex items-start justify-between gap-3 flex-wrap sm:flex-nowrap">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2 flex-wrap mb-1.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {n.title ? (
+                          <h3 className="text-base font-semibold text-ink-900">{n.title}</h3>
+                        ) : (
+                          <h3 className="text-base font-medium text-ink-500 italic">Naamloze notitie</h3>
                         )}
+                        <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-medium text-brand-700 border border-brand-200">
+                          <Globe className="h-3 w-3" /> Gedeeld
+                        </span>
                       </div>
-                      <button
-                        onClick={() => handleViewAttachment(n.file_path!)}
-                        className="inline-flex items-center gap-1 text-xs font-semibold text-brand-700 hover:text-brand-800 bg-white border border-brand-200 hover:border-brand-300 rounded-lg px-2.5 py-1.5 transition-all shadow-sm"
-                      >
-                        Inzien
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleOpenEdit(n)}
+                          className="p-1 text-ink-400 hover:text-ink-700 rounded transition-colors"
+                          title="Bewerken"
+                        >
+                          <Edit3 className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(n.id)}
+                          className="p-1 text-ink-400 hover:text-danger-600 rounded transition-colors"
+                          title="Verwijderen"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
-                  )}
+                    
+                    {n.body && (
+                      <p className="text-sm text-ink-700 whitespace-pre-wrap mt-2 leading-relaxed bg-ink-50/20 p-3.5 rounded-lg border border-ink-100">
+                        {n.body}
+                      </p>
+                    )}
 
-                  <p className="text-xs text-ink-400 mt-3.5 flex items-center gap-1">
-                    Laatst bijgewerkt: {formatDateTime(n.updated_at)}
-                  </p>
+                    {attList.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        {attList.map((att: any, idx: number) => {
+                          const fPath = att.file_path || att.filePath;
+                          const fName = att.file_name || att.fileName || "Bijlage";
+                          const fSize = att.file_size || att.fileSize;
+                          return (
+                            <div key={idx} className="flex items-center justify-between gap-4 p-2.5 bg-brand-50/50 hover:bg-brand-50 border border-brand-100 rounded-xl text-sm max-w-lg transition-colors">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <Paperclip className="h-4 w-4 text-brand-600 flex-shrink-0" />
+                                <span className="font-semibold text-ink-800 truncate" title={fName}>
+                                  {fName}
+                                </span>
+                                {fSize ? (
+                                  <span className="text-xs text-ink-400 font-mono flex-shrink-0">
+                                    ({formatBytes(fSize)})
+                                  </span>
+                                ) : null}
+                              </div>
+                              <button
+                                onClick={() => handleViewAttachment(fPath, fName, fSize)}
+                                className="inline-flex items-center gap-1 text-xs font-semibold text-brand-700 hover:text-brand-800 bg-white border border-brand-200 hover:border-brand-300 rounded-lg px-2.5 py-1.5 transition-all shadow-sm"
+                              >
+                                Inzien
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <p className="text-xs text-ink-400 mt-3.5 flex items-center gap-1">
+                      Laatst bijgewerkt: {formatDateTime(n.updated_at)}
+                    </p>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
+
+      {showModal && (
+        <Modal
+          open={showModal}
+          onClose={() => setShowModal(false)}
+          title={editingNote ? "Notitie bewerken" : "Nieuwe notitie"}
+          size="md"
+          footer={
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowModal(false)} className="btn-secondary" disabled={saving}>
+                Annuleren
+              </button>
+              <button onClick={handleSave} className="btn-primary" disabled={saving || uploading}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
+                {editingNote ? "Opslaan" : "Toevoegen"}
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-ink-700 uppercase tracking-wider mb-1">
+                Titel
+              </label>
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Bijv. Vraag over kwartaalafsluiting"
+                className="input w-full"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-ink-700 uppercase tracking-wider mb-1">
+                Inhoud / Bericht
+              </label>
+              <textarea
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                placeholder="Typ hier uw toelichting of opmerking..."
+                className="input w-full min-h-[120px] resize-y"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-ink-700 uppercase tracking-wider mb-1">
+                Bijlagen
+              </label>
+              <div className="space-y-2">
+                {attachments.map((att, i) => (
+                  <div key={i} className="flex items-center justify-between p-2.5 bg-ink-50 rounded-lg border border-ink-200 text-xs">
+                    <span className="font-medium text-ink-800 truncate max-w-[280px]">{att.fileName}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveAttachment(i)}
+                      className="text-danger-600 hover:text-danger-800 p-1"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+
+                <label className="inline-flex items-center gap-1.5 px-3 py-2 bg-white border border-ink-300 rounded-lg text-xs font-medium text-ink-700 hover:bg-ink-50 cursor-pointer transition-colors">
+                  {uploading ? <Loader2 className="h-4 w-4 animate-spin text-brand-600" /> : <Paperclip className="h-4 w-4 text-ink-500" />}
+                  <span>{uploading ? "Bezig met uploaden..." : "Bestand toevoegen"}</span>
+                  <input
+                    type="file"
+                    multiple
+                    onChange={handleFileUpload}
+                    className="hidden"
+                    disabled={uploading}
+                  />
+                </label>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
+      <NoteAttachmentModal attachment={viewAttachmentTarget} onClose={() => setViewAttachmentTarget(null)} />
     </div>
   );
 }

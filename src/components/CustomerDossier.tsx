@@ -19,6 +19,7 @@ import {
   Image as ImageIcon, UploadCloud, Eye,
 } from "lucide-react";
 import { TransferCustomerModal } from "@/components/TransferCustomerModal";
+import { NoteAttachmentModal, type NoteAttachmentTarget } from "@/components/NoteAttachmentModal";
 
 export type DossierTab = "profile" | "uploads" | "archive" | "notes" | "communication" | "status" | "vatcalc";
 
@@ -385,6 +386,7 @@ function ArchiveTab({ customer }: { customer: CustomerRow }) {
   const [deleteTarget, setDeleteTarget] = useState<{ kind: "folder" | "file"; id: string; name: string } | null>(null);
   const [notesTarget, setNotesTarget] = useState<{ kind: "folder" | "file"; id: string; name: string } | null>(null);
   const [editingNote, setEditingNote] = useState<UserNote | null>(null);
+  const [viewAttachmentTarget, setViewAttachmentTarget] = useState<NoteAttachmentTarget>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -512,13 +514,8 @@ function ArchiveTab({ customer }: { customer: CustomerRow }) {
     }
   };
 
-  const handleViewAttachment = async (filePath: string) => {
-    try {
-      const res = await api.dossierNoteAttachmentView(filePath);
-      window.open(res.url, "_blank");
-    } catch {
-      push("error", "Bijlage kon niet worden geopend.");
-    }
+  const handleViewAttachment = (filePath: string, fileName?: string, fileSize?: number) => {
+    setViewAttachmentTarget({ filePath, fileName, fileSize });
   };
 
   return (
@@ -624,7 +621,7 @@ function ArchiveTab({ customer }: { customer: CustomerRow }) {
                                 </span>
                                 {att.file_size && <span className="text-[10px] text-ink-400 font-mono">{formatBytes(att.file_size)}</span>}
                                 <button
-                                  onClick={() => handleViewAttachment(att.file_path)}
+                                  onClick={() => handleViewAttachment(att.file_path, att.file_name, att.file_size)}
                                   className="btn-ghost py-1 px-2 text-brand-600 hover:text-brand-700 font-semibold"
                                 >
                                   Inzien
@@ -640,7 +637,7 @@ function ArchiveTab({ customer }: { customer: CustomerRow }) {
                             </span>
                             {n.file_size && <span className="text-[10px] text-ink-400 font-mono">{formatBytes(n.file_size)}</span>}
                             <button
-                              onClick={() => handleViewAttachment(n.file_path!)}
+                              onClick={() => handleViewAttachment(n.file_path!, n.file_name || undefined, n.file_size || undefined)}
                               className="btn-ghost py-1 px-2 text-brand-600 hover:text-brand-700 font-semibold"
                             >
                               Inzien
@@ -688,6 +685,7 @@ function ArchiveTab({ customer }: { customer: CustomerRow }) {
       {editingNote && (
         <NoteFormModal customer={customer} note={editingNote} onClose={() => setEditingNote(null)} onSaved={load} />
       )}
+      <NoteAttachmentModal attachment={viewAttachmentTarget} onClose={() => setViewAttachmentTarget(null)} />
     </div>
   );
 }
@@ -797,6 +795,7 @@ function NotesTab({ customer }: { customer: CustomerRow }) {
   const [editing, setEditing] = useState<UserNote | null>(null);
   const [movingNote, setMovingNote] = useState<UserNote | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [viewAttachmentTarget, setViewAttachmentTarget] = useState<NoteAttachmentTarget>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -808,7 +807,7 @@ function NotesTab({ customer }: { customer: CustomerRow }) {
     } finally {
       setLoading(false);
     }
-  }, [customer.id, push]);
+  }, [customer.id]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -822,13 +821,8 @@ function NotesTab({ customer }: { customer: CustomerRow }) {
     }
   };
 
-  const handleViewAttachment = async (filePath: string) => {
-    try {
-      const res = await api.dossierNoteAttachmentView(filePath);
-      window.open(res.url, "_blank");
-    } catch {
-      push("error", "Bijlage kon niet worden geopend.");
-    }
+  const handleViewAttachment = (filePath: string, fileName?: string, fileSize?: number) => {
+    setViewAttachmentTarget({ filePath, fileName, fileSize });
   };
 
   return (
@@ -870,7 +864,7 @@ function NotesTab({ customer }: { customer: CustomerRow }) {
                           </span>
                           {att.file_size && <span className="text-[10px] text-ink-400 font-mono">{formatBytes(att.file_size)}</span>}
                           <button
-                            onClick={() => handleViewAttachment(att.file_path)}
+                            onClick={() => handleViewAttachment(att.file_path, att.file_name, att.file_size)}
                             className="btn-ghost py-1 px-2 text-brand-600 hover:text-brand-700 font-semibold"
                           >
                             Inzien
@@ -886,7 +880,7 @@ function NotesTab({ customer }: { customer: CustomerRow }) {
                       </span>
                       {n.file_size && <span className="text-[10px] text-ink-400 font-mono">{formatBytes(n.file_size)}</span>}
                       <button
-                        onClick={() => handleViewAttachment(n.file_path!)}
+                        onClick={() => handleViewAttachment(n.file_path!, n.file_name || undefined, n.file_size || undefined)}
                         className="btn-ghost py-1 px-2 text-brand-600 hover:text-brand-700 font-semibold"
                       >
                         Inzien
@@ -921,6 +915,7 @@ function NotesTab({ customer }: { customer: CustomerRow }) {
           onMoved={load}
         />
       )}
+      <NoteAttachmentModal attachment={viewAttachmentTarget} onClose={() => setViewAttachmentTarget(null)} />
     </div>
   );
 }

@@ -1,9 +1,11 @@
 import {
   calculateVatReport as calculateBtwReport,
-  type RawTransaction as BtwRawTransaction
+  type RawTransaction as BtwRawTransaction,
+  type NettoBtwOverzicht
 } from "./btwEngine.js";
 
 export type RawTransaction = BtwRawTransaction;
+export type { NettoBtwOverzicht };
 
 export interface ClassifiedTransaction {
   id: string;
@@ -24,6 +26,7 @@ export interface VatReport {
   totaal_aftrekbaar: number;
   btw_eindsaldo: number;
   total_processed: number;
+  overzicht: NettoBtwOverzicht;
   transactions: ClassifiedTransaction[];
 }
 
@@ -162,6 +165,7 @@ export function calculateVatReport(
     totaal_aftrekbaar: btwReport.breakdown.aftrekbare_btw_totaal,
     btw_eindsaldo: btwReport.btw_eindsaldo,
     total_processed: btwReport.herkenning.totaal_transacties,
+    overzicht: btwReport.overzicht,
     transactions: btwReport.transactions.map(t => ({
       id: t.id,
       category: t.classification,

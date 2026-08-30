@@ -128,6 +128,28 @@ export function isTwijfelgeval(t: ProcessedTransaction): boolean {
 }
 
 /**
+ * BETROUWBAARHEIDSSCORE — heuristische indicator (0-100), GEEN formele
+ * certificering. Gebaseerd op: (a) of de interne zelfcontroles (audit)
+ * kloppen, (b) welk aandeel van de transacties nog op de standaard draait
+ * zonder bevestigde herkenning, en (c) hoeveel mogelijke dubbele transacties
+ * zijn gevonden. Bedoeld als praktisch signaal voor de gebruiker, niet als
+ * vervanging van een fiscale beoordeling.
+ */
+export function berekenBetrouwbaarheidsscore(report: VatReport): number {
+  let score = 100;
+  if (!report.audit.ok) {
+    score -= Math.min(50, report.audit.problemen.length * 10);
+  }
+  const totaal = report.herkenning.totaal_transacties;
+  if (totaal > 0) {
+    const twijfelFractie = report.transactions.filter(isTwijfelgeval).length / totaal;
+    score -= twijfelFractie * 20;
+  }
+  score -= Math.min(10, report.mogelijke_dubbele_transacties.length * 2);
+  return round2(Math.max(0, Math.min(100, score)));
+}
+
+/**
  * Genereert een STABIEL transactie-ID op basis van de inhoud van de
  * transactie zelf (datum + omschrijving + bedrag + tegenrekening), in plaats
  * van de positie in de lijst ("t1", "t2", ...). Gebruik dit ID als sleutel
@@ -146,13 +168,23 @@ export function genereerStabielTransactieId(tx: {
   tegenrekening_iban?: string;
 }): string {
   const basis = `${tx.date ?? ''}|${(tx.description ?? '').trim().toLowerCase()}|${tx.amount_incl.toFixed(2)}|${(tx.tegenrekening_iban ?? '').trim().toUpperCase()}`;
-  // Kleine, deterministische hash (FNV-1a-achtig) — geen crypto-dependency nodig, werkt identiek in elke JS-omgeving (browser/Node/AI Studio).
-  let hash = 2166136261;
+  // Twee onafhankelijke 32-bit FNV-1a-hashes met verschillende startwaarden,
+  // samengevoegd tot een effectief 64-bit ID. Eén enkele 32-bit hash heeft
+  // bij grote bestanden (duizenden regels, bv. een glazenwasser met een
+  // jaar aan dagelijkse mutaties) een niet-verwaarloosbare kans dat twee
+  // VERSCHILLENDE transacties toevallig hetzelfde ID krijgen — met een
+  // belastingberekening als toepassing is dat risico het niet waard. Met
+  // twee onafhankelijke hashes is de kans op botsing verwaarloosbaar, ook
+  // bij tienduizenden transacties.
+  let hashA = 2166136261;
+  let hashB = 0x811c9dc5 ^ 0x9e3779b9; // andere startwaarde dan hashA
   for (let i = 0; i < basis.length; i++) {
-    hash ^= basis.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
+    const c = basis.charCodeAt(i);
+    hashA ^= c;
+    hashA = Math.imul(hashA, 16777619);
+    hashB = Math.imul(hashB ^ c, 2654435761);
   }
-  return `tx_${(hash >>> 0).toString(16)}`;
+  return `tx_${(hashA >>> 0).toString(16)}${(hashB >>> 0).toString(16)}`;
 }
 
 export interface AppliedRule {
@@ -176,6 +208,9 @@ export interface ProcessedTransaction {
   bedrag_excl: number;
   btw_bedrag: number;
   bedrag_incl: number;
+  /** Onafgeronde excl./BTW-waarden, uitsluitend bedoeld voor optelling naar de hoofdtotalen (zie exacteSplit) — niet tonen aan de gebruiker, gebruik bedrag_excl/btw_bedrag voor weergave. */
+  _bedrag_excl_precisie: number;
+  _btw_bedrag_precisie: number;
   aftrekbaar: boolean;
   applied_rule: AppliedRule;
   /** true = met voldoende zekerheid geclassificeerd (regel of AI-consensus); false = veilige standaard toegepast bij gebrek aan match/consensus. */
@@ -199,8 +234,111 @@ export interface HerkenningRapport {
   controle_aanbevolen: ProcessedTransaction[];
 }
 
+// ----------------------------------------------------------------------------
+// NETTO BTW-OVERZICHT — DE LEIDENDE, GEBRUIKERSGERICHTE WEERGAVE
+// ----------------------------------------------------------------------------
+//
+// BTW over inkomsten en BTW over uitgaven zijn twee volledig gescheiden
+// stromen met een verschillende betekenis (verschuldigd vs. aftrekbaar).
+// Deze structuur is bewust ontworpen zodat de gebruiker élk getoond bedrag
+// kan optellen en exact op het volgende totaal uitkomt — inclusief het
+// eindresultaat. Géén van de velden hierin is een "gemengd" getal (zoals
+// totale_btw_21/totale_btw_9 dat wél zijn — die blijven verderop in dit
+// bestand bestaan voor interne validatie/traceerbaarheid, maar zijn NOOIT
+// bedoeld als leidend cijfer in de UI).
+//
+// Belangrijk verschil met de rest van de engine: de deelbedragen hieronder
+// worden EERST individueel afgerond (op 2 decimalen, zoals ze getoond
+// worden), en de totalen zijn de som van DIE afgeronde deelbedragen — niet
+// een apart afgeronde som van de ongeronde precisie-waarden. Dat garandeert
+// dat "€3.197,29 + €87,94" voor de gebruiker altijd EXACT "€3.285,23"
+// oplevert, ook in randgevallen waar afronding anders een cent zou kunnen
+// schelen.
+
+export interface VerschuldigdeBtwRegel {
+  label: string;
+  bedrag: number;
+}
+
+export interface NettoBtwOverzicht {
+  verschuldigd: {
+    /** BTW over inkomsten belast tegen 21%. */
+    inkomsten_21: number;
+    /** BTW over inkomsten belast tegen 9%. */
+    inkomsten_9: number;
+    /** Zelf berekende BTW over buitenlandse diensten (verleggingsregeling) — telt hier mee als verschuldigd (Rubriek 2a). */
+    verlegde_btw: number;
+    /** inkomsten_21 + inkomsten_9 + verlegde_btw, som van de HIERBOVEN getoonde (al afgeronde) bedragen. */
+    totaal: number;
+  };
+  aftrekbaar: {
+    /** Aftrekbare voorbelasting over uitgaven belast tegen 21%. */
+    uitgaven_21: number;
+    /** Aftrekbare voorbelasting over uitgaven belast tegen 9%. */
+    uitgaven_9: number;
+    /** Dezelfde verlegde BTW als bij verschuldigd — direct aftrekbaar tegenover de zelf berekende verschuldigde BTW (Rubriek 5b), netto-effect nul. */
+    verlegde_btw: number;
+    /** uitgaven_21 + uitgaven_9 + verlegde_btw, som van de HIERBOVEN getoonde (al afgeronde) bedragen. */
+    totaal: number;
+  };
+  /** Ter informatie — géén onderdeel van verschuldigd of aftrekbaar. BTW die niet als voorbelasting mag worden afgetrokken (BUA/horeca, art. 15 lid 5). */
+  niet_aftrekbaar_ter_info: number;
+  /** verschuldigd.totaal − aftrekbaar.totaal. Positief = af te dragen, negatief = terug te vorderen. */
+  netto_btw: number;
+  status: 'af_te_dragen' | 'terug_te_vorderen';
+  /** Kant-en-klare, leesbare toelichtingstekst met automatisch wisselende "af te dragen"/"terug te vorderen"-formulering — direct te tonen in een uitklapbaar blok. */
+  toelichting: string;
+}
+
+function formatEuroKaal(n: number): string {
+  return new Intl.NumberFormat('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(n));
+}
+
+/**
+ * Bouwt het leidende, transparante BTW-overzicht (verschuldigd/aftrekbaar
+ * volledig gescheiden) vanuit een reeds berekend VatReport. Wordt ook
+ * automatisch als report.overzicht meegeleverd — deze functie hoeft de
+ * host-app dus niet apart aan te roepen, maar is ook los bruikbaar.
+ */
+export function bouwNettoBtwOverzicht(r: {
+  breakdown: VatReport['breakdown'];
+  niet_aftrekbare_btw: number;
+}): NettoBtwOverzicht {
+  const inkomsten_21 = round2(r.breakdown.verschuldigde_btw_omzet_21);
+  const inkomsten_9 = round2(r.breakdown.verschuldigde_btw_omzet_9);
+  const verlegd = round2(r.breakdown.verlegde_btw_rubriek_2a);
+  const uitgaven_21 = round2(r.breakdown.aftrekbare_btw_kosten_21);
+  const uitgaven_9 = round2(r.breakdown.aftrekbare_btw_kosten_9);
+
+  // Totalen zijn de som van de HIERBOVEN al-afgeronde regels — garandeert
+  // exacte optelbaarheid voor de gebruiker (zie moduledocumentatie hierboven).
+  const verschuldigd_totaal = round2(inkomsten_21 + inkomsten_9 + verlegd);
+  const aftrekbaar_totaal = round2(uitgaven_21 + uitgaven_9 + verlegd);
+  const netto_btw = round2(verschuldigd_totaal - aftrekbaar_totaal);
+  const status: 'af_te_dragen' | 'terug_te_vorderen' = netto_btw >= 0 ? 'af_te_dragen' : 'terug_te_vorderen';
+
+  const toelichting =
+    status === 'af_te_dragen'
+      ? `€${formatEuroKaal(verschuldigd_totaal)} verschuldigde BTW\n− €${formatEuroKaal(aftrekbaar_totaal)} aftrekbare voorbelasting\n= €${formatEuroKaal(netto_btw)} af te dragen`
+      : `€${formatEuroKaal(verschuldigd_totaal)} verschuldigde BTW\n− €${formatEuroKaal(aftrekbaar_totaal)} aftrekbare voorbelasting\n= −€${formatEuroKaal(netto_btw)}\n€${formatEuroKaal(netto_btw)} terug te vorderen`;
+
+  return {
+    verschuldigd: { inkomsten_21, inkomsten_9, verlegde_btw: verlegd, totaal: verschuldigd_totaal },
+    aftrekbaar: { uitgaven_21, uitgaven_9, verlegde_btw: verlegd, totaal: aftrekbaar_totaal },
+    niet_aftrekbaar_ter_info: round2(r.niet_aftrekbare_btw),
+    netto_btw,
+    status,
+    toelichting,
+  };
+}
+
 export interface VatReport {
   // --- De 8 verplichte hoofdvarianten ---
+  // LET OP: totale_btw_21 en totale_btw_9 zijn GEMENGDE getallen (verschuldigde
+  // BTW over inkomsten + aftrekbare BTW over uitgaven van hetzelfde tarief
+  // samen opgeteld). Ze zijn bedoeld als informatief/validatiecijfer, NIET
+  // als leidend getal in de UI en NOOIT als basis voor het eindsaldo — gebruik
+  // daarvoor uitsluitend `overzicht` hieronder (zie NettoBtwOverzicht).
   totaal_incl_21: number;
   totaal_excl_21: number;
   totaal_incl_9: number;
@@ -209,6 +347,9 @@ export interface VatReport {
   totale_btw_9: number;
   niet_aftrekbare_btw: number;
   btw_eindsaldo: number;
+
+  /** DE LEIDENDE, GEBRUIKERSGERICHTE WEERGAVE — verschuldigd en aftrekbaar volledig gescheiden, gegarandeerd optelbaar. Gebruik dit object voor de UI, niet de individuele velden hierboven. */
+  overzicht: NettoBtwOverzicht;
 
   breakdown: {
     verschuldigde_btw_omzet_21: number;
@@ -223,6 +364,10 @@ export interface VatReport {
   herkenning: HerkenningRapport;
   /** Automatische zelfcontrole van de eigen rekenuitkomst — draait bij elke berekening, geen actie van de gebruiker nodig. */
   audit: AuditResult;
+  /** Regels die NIET zijn meegerekend omdat ze werden herkend als samenvatting/totaal (zie filterSamenvattingsregels) — nooit stilzwijgend weggelaten, altijd hier zichtbaar met reden. */
+  genegeerde_samenvattingsregels: GenegeerdeSamenvattingsregel[];
+  /** Groepen transacties met identieke datum+omschrijving+bedrag — mogelijk een dubbele import, mogelijk legitiem. Blijven meegeteld in de berekening; toon dit aan de gebruiker ter bevestiging, voeg niet automatisch samen. */
+  mogelijke_dubbele_transacties: MogelijkDubbeleGroep[];
   transactions: ProcessedTransaction[];
 }
 
@@ -384,8 +529,41 @@ interface ClassifyResult {
   zekerheid: Zekerheid;
 }
 
+// Tekens die meetellen als "onderdeel van een woord" — gebruikt om
+// woordgrenzen te bepalen. Standaard \b in JS-regex werkt niet goed met
+// Nederlandse letters (é, ë, ç, ...), vandaar deze eigen tekenklasse.
+const WOORD_TEKENS = 'a-z0-9àáâäæçèéêëìíîïñòóôöùúûüý';
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Zoekt trefwoorden op WOORDGRENZEN, niet als kale substring. Voorkomt
+ * valse positieven zoals "esso" (brandstofmerk) dat toevallig binnen
+ * "acc-ESSO-ire" (Bol.com-omschrijving "...Accessoire") voorkomt. Elk
+ * trefwoord moet dus als los woord/losse woordgroep voorkomen, omringd
+ * door begin/einde van de tekst of een niet-woordteken (spatie,
+ * leesteken).
+ */
+// Regex-cache: voorkomt dat dezelfde patronen duizenden keren opnieuw
+// worden gecompileerd bij grote bestanden (belangrijk bij 4000+ transacties).
+const regexCache = new Map<string, RegExp>();
+function getPattern(needle: string): RegExp {
+  let re = regexCache.get(needle);
+  if (!re) {
+    re = new RegExp(`(?:^|[^${WOORD_TEKENS}])${escapeRegExp(needle)}(?:[^${WOORD_TEKENS}]|$)`, 'i');
+    regexCache.set(needle, re);
+  }
+  return re;
+}
+
 function matchesAny(haystack: string, needles: string[]): boolean {
-  return needles.some((n) => haystack.includes(n));
+  return needles.some((needleRaw) => {
+    const needle = needleRaw.trim().toLowerCase();
+    if (!needle) return false;
+    return getPattern(needle).test(haystack);
+  });
 }
 
 function pad(s: string): string {
@@ -420,6 +598,9 @@ const FOOD_KEYWORDS = [
   'albert heijn', 'jumbo', 'lidl', 'aldi', 'plus supermarkt', 'coop supermarkt',
   'dirk van den broek', 'vomar', 'spar', 'boni', 'supermarkt', 'pantry',
 ];
+
+/** Boeken, tijdschriften, kranten en e-books vallen onder Tabel I (9%) — zowel bij verkoop (omzet) als inkoop (kosten). */
+const BOEKEN_KEYWORDS = ['boek', 'boeken', 'tijdschrift', 'tijdschriften', 'e-book', 'ebook', 'krant', 'dagblad'];
 
 const GOVERNMENT_KEYWORDS = [
   'belastingdienst', 'kamer van koophandel', ' kvk ', 'kvk nederland', 'rdw',
@@ -478,8 +659,7 @@ function layer0_privateTransaction(ctx: ClassifyContext): ClassifyResult | null 
 
 // --- Laag 1: exacte leveranciersnaam -----------------------------------------
 function layer1_knownVendor(ctx: ClassifyContext): ClassifyResult | null {
-  const normType = (ctx.type === 'income' || (ctx.type as unknown) === 'Inkomsten') ? 'income' : 'expense';
-  if (normType !== 'expense') return null;
+  if (ctx.type !== 'expense') return null;
   if (matchesAny(pad(ctx.description), REVERSE_CHARGE_VENDORS)) {
     return {
       classification: 'verlegd_21',
@@ -533,8 +713,7 @@ function layer1_knownVendor(ctx: ClassifyContext): ClassifyResult | null {
 
 // --- Laag 2: trefwoorden in de memo/mededeling -------------------------------
 function layer2_memoKeywords(ctx: ClassifyContext): ClassifyResult | null {
-  const normType = (ctx.type === 'income' || (ctx.type as unknown) === 'Inkomsten') ? 'income' : 'expense';
-  if (normType !== 'expense' || !ctx.memo) return null;
+  if (ctx.type !== 'expense' || !ctx.memo) return null;
   const memo = pad(ctx.memo);
   if (matchesAny(memo, TRANSPORT_KEYWORDS)) {
     return {
@@ -567,13 +746,77 @@ function layer2_memoKeywords(ctx: ClassifyContext): ClassifyResult | null {
   return null;
 }
 
+// --- Laag 2B: expliciet in de tekst genoemd BTW-percentage — een sterk
+// signaal, want de bron zegt het letterlijk zelf ("Verkoop 9%", "Factuur
+// incl. 21% BTW"). Geldt voor zowel inkomsten als uitgaven en gaat vóór de
+// zwakkere gecombineerde/brede-categorie-lagen (3, 3B, 4), maar NIET vóór
+// een specifieke categorie-match (horeca, overheid, boeken, transport, ...)
+// — die geeft namelijk zowel het tarief ALS de juiste aftrekbaarheid/
+// wettelijk verplichte indeling in één keer, wat vollediger en dwingender
+// is dan een kaal percentage (bv. boeken zijn wettelijk altijd 9%, ook als
+// de tekst per ongeluk "21%" zou noemen).
+//
+// VEILIGHEIDSGRENS: een percentage in de tekst betekent niet altijd een
+// BTW-tarief — "Rentevergoeding 9%" of "21% korting" hebben niets met BTW
+// te maken. Daarom: expliciet BLOKKEREN bij niet-BTW-context-woorden, en
+// alleen 'hoog' vertrouwen geven als het woord "btw" (of variant) ook
+// daadwerkelijk in de tekst staat; zonder dat woord blijft het 'gemiddeld'
+// (nog steeds automatisch toegepast, maar met een lagere zekerheidslabel).
+const EXPLICIET_PERCENTAGE_PATROON = /(^|[^0-9])(0|9|21)\s?%/;
+const NIET_BTW_PERCENTAGE_CONTEXT = [
+  'korting', 'rente', 'rendement', 'reductie', 'discount', 'rentevergoeding',
+  'aflossing', 'annuïteit', 'annuiteit', 'rentepercentage', 'rabat',
+];
+const BTW_CONTEXT_WOORDEN = ['btw', 'b.t.w', 'omzetbelasting', 'incl.', 'excl.', 'incl ', 'excl '];
+
+function layer2c_boekenExpense(ctx: ClassifyContext): ClassifyResult | null {
+  if (!matchesAny(ctx.combined, BOEKEN_KEYWORDS)) return null;
+  return {
+    classification: 'kosten_verlaagd_9',
+    herkend: true,
+    herkenningsbron: 'Herkend als boeken/tijdschriften (Tabel I, wettelijk verlaagd tarief 9%).',
+    korte_toelichting_override: 'Boeken/tijdschriften belast tegen het verlaagde BTW-tarief van 9% (Tabel I Wet OB 1968).',
+    bron: 'automatisch_omschrijving',
+    zekerheid: 'hoog',
+  };
+}
+
+function layer2c_boekenIncome(ctx: ClassifyContext): ClassifyResult | null {
+  if (!matchesAny(ctx.combined, BOEKEN_KEYWORDS)) return null;
+  return {
+    classification: 'omzet_verlaagd_9',
+    herkend: true,
+    herkenningsbron: 'Herkend als boeken/tijdschriften (Tabel I, wettelijk verlaagd tarief 9%).',
+    korte_toelichting_override: 'Verkoop van boeken/tijdschriften belast tegen het verlaagde BTW-tarief van 9% (art. 9 lid 2 jo. Tabel I Wet OB 1968).',
+    bron: 'automatisch_omschrijving',
+    zekerheid: 'hoog',
+  };
+}
+
+function layer2b_explicietPercentage(ctx: ClassifyContext): ClassifyResult | null {
+  if (matchesAny(ctx.combined, NIET_BTW_PERCENTAGE_CONTEXT)) return null;
+  const match = ctx.combined.match(EXPLICIET_PERCENTAGE_PATROON);
+  if (!match) return null;
+  const pct = Number(match[2]) as 0 | 9 | 21;
+  const classification = classificationFromPercentage(pct, ctx.type);
+  const heeftBtwWoord = matchesAny(ctx.combined, BTW_CONTEXT_WOORDEN);
+  return {
+    classification,
+    herkend: true,
+    herkenningsbron: heeftBtwWoord
+      ? `Expliciet BTW-percentage (${pct}%) genoemd in de omschrijving/mededeling — rechtstreeks overgenomen.`
+      : `Percentage (${pct}%) genoemd in de omschrijving/mededeling, zonder expliciet "btw" erbij — waarschijnlijk het BTW-tarief, maar met iets minder zekerheid dan een expliciete BTW-vermelding.`,
+    bron: 'automatisch_omschrijving',
+    zekerheid: heeftBtwWoord ? 'hoog' : 'gemiddeld',
+  };
+}
+
 // --- Laag 3B: ECHTE tegenstrijdigheid — Nederlandse rechtsvorm + buitenlands rekeningnummer + claim van verlegde BTW ---
 const NL_ENTITY_SUFFIXES = ['b.v.', ' bv ', ' bv/', 'n.v.', ' nv ', 'v.o.f.', ' vof ', 'eenmanszaak'];
 const REVERSE_CHARGE_CLAIM_KEYWORDS = ['btw verlegd', 'verlegde btw', 'reverse charge', 'vat reverse'];
 
 function layer3b_conflictDetection(ctx: ClassifyContext): ClassifyResult | null {
-  const normType = (ctx.type === 'income' || (ctx.type as unknown) === 'Inkomsten') ? 'income' : 'expense';
-  if (normType !== 'expense') return null;
+  if (ctx.type !== 'expense') return null;
   const country = ibanCountry(ctx.tegenrekening_iban);
   if (!country || country === 'NL') return null;
   const looksLikeDutchEntity = matchesAny(pad(ctx.description), NL_ENTITY_SUFFIXES);
@@ -592,8 +835,7 @@ function layer3b_conflictDetection(ctx: ClassifyContext): ClassifyResult | null 
 
 // --- Laag 3: gecombineerde zwakkere signalen (buitenlands IBAN + dienst-trefwoord) ---
 function layer3_combinedSignals(ctx: ClassifyContext): ClassifyResult | null {
-  const normType = (ctx.type === 'income' || (ctx.type as unknown) === 'Inkomsten') ? 'income' : 'expense';
-  if (normType !== 'expense') return null;
+  if (ctx.type !== 'expense') return null;
   const country = ibanCountry(ctx.tegenrekening_iban);
   if (!country || country === 'NL') return null;
   const hasServiceHint = matchesAny(ctx.combined, FOREIGN_SERVICE_HINT_KEYWORDS);
@@ -611,8 +853,7 @@ function layer3_combinedSignals(ctx: ClassifyContext): ClassifyResult | null {
 
 // --- Laag 4: brede generieke categorieën -------------------------------------
 function layer4_broadCategories(ctx: ClassifyContext): ClassifyResult | null {
-  const normType = (ctx.type === 'income' || (ctx.type as unknown) === 'Inkomsten') ? 'income' : 'expense';
-  if (normType !== 'expense') return null;
+  if (ctx.type !== 'expense') return null;
   const c = ctx.combined;
   if (matchesAny(c, INSURANCE_KEYWORDS)) {
     return {
@@ -699,12 +940,11 @@ export function autoClassify(
   memo?: string,
   tegenrekening_iban?: string
 ): { classification: ClassificationKey; herkend: boolean; herkenningsbron: string; korte_toelichting_override?: string; bron: ClassificationSource; zekerheid: Zekerheid } {
-  const normType: 'income' | 'expense' = (type === 'income' || (type as unknown) === 'Inkomsten') ? 'income' : 'expense';
   const ctx: ClassifyContext = {
     description: description ?? '',
     memo: memo ?? '',
     combined: pad(`${description ?? ''} ${memo ?? ''}`),
-    type: normType,
+    type,
     tegenrekening_iban,
   };
 
@@ -712,8 +952,16 @@ export function autoClassify(
   const priv = layer0_privateTransaction(ctx);
   if (priv) return priv;
 
-  if (normType === 'expense') {
-    const layers = [layer1_knownVendor, layer2_memoKeywords, layer3b_conflictDetection, layer3_combinedSignals, layer4_broadCategories];
+  if (type === 'expense') {
+    const layers = [
+      layer1_knownVendor,
+      layer2_memoKeywords,
+      layer2c_boekenExpense, // wettelijk vaststaand tarief -> vóór het kale-percentage-signaal
+      layer2b_explicietPercentage,
+      layer3b_conflictDetection,
+      layer3_combinedSignals,
+      layer4_broadCategories,
+    ];
     for (const layer of layers) {
       const result = layer(ctx);
       if (result) return result;
@@ -743,6 +991,15 @@ export function autoClassify(
       bron: 'automatisch_regelgebaseerd',
       zekerheid: 'hoog',
     };
+  }
+  {
+    // Wettelijk vaststaand tarief -> ook hier vóór het kale-percentage-signaal.
+    const boeken = layer2c_boekenIncome(ctx);
+    if (boeken) return boeken;
+  }
+  {
+    const expliciet = layer2b_explicietPercentage(ctx);
+    if (expliciet) return expliciet;
   }
   // Zelfde redenering als bij uitgaven: geen signaal voor iets anders dan
   // het algemene tarief gevonden -> dat tarief geldt met vertrouwen.
@@ -810,6 +1067,34 @@ function approxEqual(a: number, b: number, tolerance = ROUNDING_TOLERANCE): bool
   return Math.abs(a - b) <= tolerance;
 }
 
+/**
+ * Berekent de excl./BTW/incl.-opbouw van één transactie op VOLLE PRECISIE
+ * (geen tussentijdse afronding). Wordt gebruikt voor twee doelen die elk hun
+ * eigen precisie nodig hebben:
+ *   - Weergave per transactie: hiervan wordt met `round2()` een nette
+ *     centbedrag gemaakt (zo zou het ook op een echte factuur staan).
+ *   - Optellen naar de 8 hoofdtotalen: hiervoor gebruikt de engine juist de
+ *     ONAFGERONDE waarden uit deze functie, opgeteld over alle transacties,
+ *     en pas HELEMAAL AAN HET EIND afgerond. Dat voorkomt dat honderden of
+ *     duizenden kleine per-regel afrondingen (elk tot €0,005) zich opstapelen
+ *     tot een merkbare afwijking bij grote bestanden — cruciaal voor de
+ *     nauwkeurigheidsdoelen bij 5.000-10.000+ transacties.
+ */
+function exacteSplit(amountIncl: number, rate: 0 | 9 | 21, mode: 'incl_split' | 'exempt' | 'reverse_charge') {
+  switch (mode) {
+    case 'incl_split': {
+      const excl = amountIncl / (1 + rate / 100);
+      return { excl, btw: amountIncl - excl, incl: amountIncl };
+    }
+    case 'exempt':
+      return { excl: amountIncl, btw: 0, incl: amountIncl };
+    case 'reverse_charge': {
+      const btw = amountIncl * (rate / 100);
+      return { excl: amountIncl, btw, incl: amountIncl + btw };
+    }
+  }
+}
+
 function processTransaction(
   tx: RawTransaction,
   classification: ClassificationKey,
@@ -825,37 +1110,15 @@ function processTransaction(
     throw new Error(`Onbekende classificatie "${classification}" voor transactie ${tx.id}.`);
   }
 
-  let bedrag_excl: number;
-  let btw_bedrag: number;
-  let bedrag_incl: number;
-
-  switch (rule.mode) {
-    case 'incl_split': {
-      bedrag_excl = round2(tx.amount_incl / (1 + rule.rate / 100));
-      btw_bedrag = round2(tx.amount_incl - bedrag_excl);
-      bedrag_incl = round2(tx.amount_incl);
-      break;
-    }
-    case 'exempt': {
-      bedrag_excl = round2(tx.amount_incl);
-      btw_bedrag = 0;
-      bedrag_incl = round2(tx.amount_incl);
-      break;
-    }
-    case 'reverse_charge': {
-      bedrag_excl = round2(tx.amount_incl);
-      btw_bedrag = round2(tx.amount_incl * (rule.rate / 100));
-      bedrag_incl = round2(bedrag_excl + btw_bedrag);
-      break;
-    }
-  }
-
-  const normType: 'income' | 'expense' = (tx.type === 'income' || (tx.type as unknown) === 'Inkomsten') ? 'income' : 'expense';
+  const precies = exacteSplit(tx.amount_incl, rule.rate, rule.mode);
+  const bedrag_excl = round2(precies.excl);
+  const btw_bedrag = round2(precies.btw);
+  const bedrag_incl = round2(precies.incl);
 
   return {
     id: tx.id,
     date: tx.date,
-    type: normType,
+    type: tx.type,
     description: tx.description,
     classification,
     rate: rule.rate,
@@ -863,6 +1126,8 @@ function processTransaction(
     bedrag_excl,
     btw_bedrag,
     bedrag_incl,
+    _bedrag_excl_precisie: precies.excl,
+    _btw_bedrag_precisie: precies.btw,
     aftrekbaar: rule.aftrekbaar,
     applied_rule: {
       classification,
@@ -898,8 +1163,7 @@ export interface BoekhouderBeoordeling {
  * na alle automatische pogingen alsnog onopgelost blijft.
  */
 function classificationFromPercentage(pct: BtwPercentage, type: TransactionType): ClassificationKey {
-  const normType = (type === 'income' || (type as unknown) === 'Inkomsten');
-  if (normType) {
+  if (type === 'income') {
     if (pct === 0) return 'omzet_vrijgesteld_0';
     if (pct === 9) return 'omzet_verlaagd_9';
     return 'omzet_algemeen_21';
@@ -939,6 +1203,130 @@ export interface CalculateVatReportOptions {
 }
 
 // ----------------------------------------------------------------------------
+// 4B. SAMENVATTINGSREGELS HERKENNEN EN NEGEREN — DE TRANSACTIES ZIJN DE ENIGE BRON
+// ----------------------------------------------------------------------------
+//
+// Een document (Excel/CSV/PDF) bevat vaak niet alleen losse transacties, maar
+// ook totaal-, subtotaal- of saldoregels. Die mogen NOOIT meetellen in de
+// BTW-berekening — anders telt de engine bedragen dubbel, of rekent hij met
+// een al-berekend (mogelijk fout of verouderd) klantcijfer in plaats van zelf
+// te rekenen. Dit is een vangnet dat ONAFHANKELIJK van de documentextractie
+// (Gemini/host-app) werkt: zelfs als de extractiestap een samenvattingsregel
+// per ongeluk als transactie doorgeeft, filtert de engine 'm er hier alsnog
+// uit, vóórdat er ook maar iets wordt geclassificeerd of opgeteld.
+
+const SAMENVATTING_TREFWOORDEN = [
+  'eindtotaal', 'subtotaal', 'totaalbedrag', 'eindsaldo', 'btw eindsaldo',
+  'btw-eindsaldo', 'totale btw', 'btw totaal', 'btw-totaal', 'btw verschuldigd',
+  'btw aftrekbaar', 'voorbelasting totaal', 'te betalen btw', 'terug te ontvangen btw',
+  'terug te vorderen btw', 'saldo btw', 'jaaroverzicht', 'kwartaaltotaal',
+  'maandtotaal', 'weektotaal', 'omzet totaal', 'totale omzet', 'kostentotaal',
+  'totale kosten', 'samenvatting', 'totaal incl', 'totaal excl', 'grand total',
+];
+
+/** Losse "totaal"/"saldo" als eerste woord (dus niet binnen "totaalpakket" e.d.) telt ook mee als signaal. */
+const SAMENVATTING_LOSSE_WOORDEN = ['totaal', 'saldo', 'eindtotaal'];
+
+export interface GenegeerdeSamenvattingsregel {
+  raw: RawTransaction;
+  reden: string;
+}
+
+/**
+ * Bepaalt of een regel een samenvattingsregel is in plaats van een
+ * daadwerkelijke transactie. Gebruikt zowel trefwoorden in de omschrijving
+ * als een structurele check: een bedrag dat (bijna) exact overeenkomt met de
+ * som van alle andere transacties is een sterke aanwijzing voor een
+ * totaalregel, ook zonder verdacht woord in de omschrijving.
+ */
+function isSamenvattingsregel(tx: RawTransaction, somAlleAnderen: number, aantalAndereRegels: number): { ja: boolean; reden?: string } {
+  const tekst = pad(`${tx.description ?? ''} ${tx.memo ?? ''}`);
+  if (matchesAny(tekst, SAMENVATTING_TREFWOORDEN)) {
+    return { ja: true, reden: `Omschrijving/mededeling bevat een samenvattingstrefwoord ("${(tx.description ?? tx.memo ?? '').trim()}").` };
+  }
+  // Begint de omschrijving zelf met "totaal"/"saldo"? (bv. "Saldo 30-09-2026").
+  // We kijken bewust alleen naar het EERSTE woord, zodat een echte transactie
+  // als "Totaalpakket Verzekering" niet onterecht sneuvelt.
+  const eersteWoord = (tx.description ?? '').trim().toLowerCase().split(/\s+/)[0] ?? '';
+  if (SAMENVATTING_LOSSE_WOORDEN.includes(eersteWoord)) {
+    return { ja: true, reden: `Omschrijving begint met een samenvattingswoord ("${tx.description}").` };
+  }
+  // Structurele check: bedrag komt (op 1 cent na) overeen met de som van
+  // MEERDERE andere transacties -> vrijwel zeker een totaalregel. De eis
+  // "minimaal 2 andere regels" is bewust: bij precies twee transacties met
+  // hetzelfde bedrag (bv. twee identieke facturen) zou "som van de ander"
+  // triviaal gelijk zijn aan het bedrag zelf — dat is dan een MOGELIJKE
+  // DUBBELE TRANSACTIE (zie vindMogelijkeDubbeleTransacties), geen totaalregel,
+  // en moet dus niet via dit filter verdwijnen.
+  if (aantalAndereRegels >= 2 && somAlleAnderen > 0 && Math.abs(tx.amount_incl - somAlleAnderen) <= 0.01) {
+    return { ja: true, reden: `Bedrag (€${tx.amount_incl.toFixed(2)}) komt exact overeen met de som van alle overige transacties — vrijwel zeker een totaalregel.` };
+  }
+  return { ja: false };
+}
+
+/**
+ * Splitst de aangeleverde regels in échte transacties en genegeerde
+ * samenvattingsregels. Wordt automatisch aan het begin van
+ * `calculateVatReport` aangeroepen — de host-app hoeft dit niet apart te
+ * doen, maar kan `report.genegeerde_samenvattingsregels` gebruiken om te
+ * tonen wat er (en waarom) is uitgesloten.
+ */
+function filterSamenvattingsregels(rawTransactions: RawTransaction[]): {
+  transacties: RawTransaction[];
+  genegeerd: GenegeerdeSamenvattingsregel[];
+} {
+  const totaalAlles = rawTransactions.reduce((s, t) => s + t.amount_incl, 0);
+  const transacties: RawTransaction[] = [];
+  const genegeerd: GenegeerdeSamenvattingsregel[] = [];
+  for (const tx of rawTransactions) {
+    const somAnderen = totaalAlles - tx.amount_incl;
+    const check = isSamenvattingsregel(tx, somAnderen, rawTransactions.length - 1);
+    if (check.ja) {
+      genegeerd.push({ raw: tx, reden: check.reden! });
+    } else {
+      transacties.push(tx);
+    }
+  }
+  return { transacties, genegeerd };
+}
+
+// ----------------------------------------------------------------------------
+// 4C. MOGELIJKE DUBBELE TRANSACTIES — SIGNALEREN, NIET AUTOMATISCH SAMENVOEGEN
+// ----------------------------------------------------------------------------
+//
+// Zelfde datum + zelfde bedrag + zelfde omschrijving is een sterk signaal
+// voor een dubbele import of dubbele betaling — maar de engine kan met
+// zekerheid noch bevestigen dat het een fout is (bv. echt twee identieke
+// facturen op dezelfde dag), noch dat het legitiem is. Daarom: BEIDE
+// transacties blijven gewoon meetellen in de berekening (net als bij een
+// echte bankmutatie — het geld is echt twee keer bewogen), maar de host-app
+// krijgt een expliciete lijst om de gebruiker om bevestiging te vragen.
+
+export interface MogelijkDubbeleGroep {
+  datum?: string;
+  omschrijving?: string;
+  bedrag: number;
+  transacties: RawTransaction[];
+}
+
+function vindMogelijkeDubbeleTransacties(rawTransactions: RawTransaction[]): MogelijkDubbeleGroep[] {
+  const groepen = new Map<string, RawTransaction[]>();
+  for (const tx of rawTransactions) {
+    const sleutel = `${tx.date ?? ''}|${(tx.description ?? '').trim().toLowerCase()}|${tx.amount_incl.toFixed(2)}`;
+    const lijst = groepen.get(sleutel) ?? [];
+    lijst.push(tx);
+    groepen.set(sleutel, lijst);
+  }
+  const resultaat: MogelijkDubbeleGroep[] = [];
+  for (const lijst of groepen.values()) {
+    if (lijst.length > 1) {
+      resultaat.push({ datum: lijst[0].date, omschrijving: lijst[0].description, bedrag: lijst[0].amount_incl, transacties: lijst });
+    }
+  }
+  return resultaat;
+}
+
+// ----------------------------------------------------------------------------
 // 5. HOOFDFUNCTIE
 // ----------------------------------------------------------------------------
 
@@ -964,6 +1352,16 @@ export function calculateVatReport(
   options: CalculateVatReportOptions = {}
 ): VatReport {
   const { classifications = {}, aiProposals = {}, percentageOverrides = {} } = options;
+
+  // STAP 0, VÓÓR ALLES: samenvattingsregels eruit filteren. De rest van de
+  // functie ziet deze regels nooit — ze kunnen dus onmogelijk meetellen.
+  const { transacties: rawTransactionsSchoon, genegeerd: genegeerde_samenvattingsregels } =
+    filterSamenvattingsregels(rawTransactions);
+  rawTransactions = rawTransactionsSchoon;
+
+  // Signaleren (niet blokkeren): mogelijke dubbele transacties op basis van
+  // de overgebleven, echte transacties.
+  const mogelijke_dubbele_transacties = vindMogelijkeDubbeleTransacties(rawTransactions);
 
   const processed = rawTransactions.map((tx) => {
     const manual = classifications[tx.id];
@@ -1075,56 +1473,82 @@ export function calculateVatReport(
     }
 
     if (p.classification === 'verlegd_21') {
-      verlegde_btw_rubriek_2a += p.btw_bedrag;
+      verlegde_btw_rubriek_2a += p._btw_bedrag_precisie;
       continue; // geen incl./excl.-opbouw; zie toelichting in de moduledocs hierboven
     }
 
     if (p.rate === 21) {
-      totaal_incl_21 += p.bedrag_incl;
-      totaal_excl_21 += p.bedrag_excl;
-      totale_btw_21 += p.btw_bedrag;
+      totaal_incl_21 += p.amount_incl_input;
+      totaal_excl_21 += p._bedrag_excl_precisie;
+      totale_btw_21 += p._btw_bedrag_precisie;
     } else if (p.rate === 9) {
-      totaal_incl_9 += p.bedrag_incl;
-      totaal_excl_9 += p.bedrag_excl;
-      totale_btw_9 += p.btw_bedrag;
+      totaal_incl_9 += p.amount_incl_input;
+      totaal_excl_9 += p._bedrag_excl_precisie;
+      totale_btw_9 += p._btw_bedrag_precisie;
     }
 
     if (p.classification === 'horeca_bua_9') {
-      niet_aftrekbare_btw += p.btw_bedrag;
+      niet_aftrekbare_btw += p._btw_bedrag_precisie;
     }
 
     if (p.type === 'income') {
-      if (p.rate === 21) verschuldigde_btw_omzet_21 += p.btw_bedrag;
-      if (p.rate === 9) verschuldigde_btw_omzet_9 += p.btw_bedrag;
+      if (p.rate === 21) verschuldigde_btw_omzet_21 += p._btw_bedrag_precisie;
+      if (p.rate === 9) verschuldigde_btw_omzet_9 += p._btw_bedrag_precisie;
     } else if (p.aftrekbaar) {
-      if (p.rate === 21) aftrekbare_btw_kosten_21 += p.btw_bedrag;
-      if (p.rate === 9) aftrekbare_btw_kosten_9 += p.btw_bedrag;
+      if (p.rate === 21) aftrekbare_btw_kosten_21 += p._btw_bedrag_precisie;
+      if (p.rate === 9) aftrekbare_btw_kosten_9 += p._btw_bedrag_precisie;
     }
   }
-
-  const verschuldigde_btw_totaal = round2(
-    verschuldigde_btw_omzet_21 + verschuldigde_btw_omzet_9 + verlegde_btw_rubriek_2a
-  );
-  // LET OP — bugfix: niet_aftrekbare_btw (BUA/horeca) wordt HIER NIET nogmaals
-  // afgetrokken. Die transacties zitten door hun classificatie (horeca_bua_9)
-  // al buiten aftrekbare_btw_kosten_9 — ze zijn daar nooit in meegeteld. Een
-  // extra "- niet_aftrekbare_btw" zou dat bedrag dus dubbel in mindering
-  // brengen en het eindsaldo ten onrechte hoger maken.
-  const aftrekbare_btw_totaal = round2(aftrekbare_btw_kosten_21 + aftrekbare_btw_kosten_9 + verlegde_btw_rubriek_2a);
-  const btw_eindsaldo = round2(verschuldigde_btw_totaal - aftrekbare_btw_totaal);
 
   const totaal_transacties = processed.length;
   const standaard_toegepast = totaal_transacties - automatisch_herkend;
 
-  const audit = auditReport(processed, {
-    totaal_incl_21: round2(totaal_incl_21),
-    totale_btw_21: round2(totale_btw_21),
-    totaal_incl_9: round2(totaal_incl_9),
-    totale_btw_9: round2(totale_btw_9),
+  // De losse categoriewaarden (nog niet de totalen) — dit zijn de bedragen
+  // die de gebruiker straks als aparte regels ziet.
+  const breakdownRegels = {
+    verschuldigde_btw_omzet_21: round2(verschuldigde_btw_omzet_21),
+    verschuldigde_btw_omzet_9: round2(verschuldigde_btw_omzet_9),
+    verlegde_btw_rubriek_2a: round2(verlegde_btw_rubriek_2a),
+    aftrekbare_btw_kosten_21: round2(aftrekbare_btw_kosten_21),
+    aftrekbare_btw_kosten_9: round2(aftrekbare_btw_kosten_9),
+  };
+
+  // `overzicht` is de ENIGE plek waar de totalen worden vastgesteld — als som
+  // van de HIERBOVEN al-afgeronde regels, zodat de gebruiker ze zelf kan
+  // narekenen. `breakdown.*_totaal` en `btw_eindsaldo` worden hier direct
+  // VAN overzicht afgeleid (niet apart opnieuw berekend), zodat er nooit twee
+  // verschillende "waarheden" in hetzelfde rapport kunnen ontstaan — precies
+  // het euvel dat eerder een verschil van 1 cent opleverde tussen twee
+  // schijnbaar onafhankelijke velden in ditzelfde object.
+  const overzicht = bouwNettoBtwOverzicht({
+    breakdown: { ...breakdownRegels, verschuldigde_btw_totaal: 0, aftrekbare_btw_totaal: 0 },
+    niet_aftrekbare_btw: round2(niet_aftrekbare_btw),
+  });
+  const verschuldigde_btw_totaal = overzicht.verschuldigd.totaal;
+  const aftrekbare_btw_totaal = overzicht.aftrekbaar.totaal;
+  const btw_eindsaldo = overzicht.netto_btw;
+
+  const breakdown = {
+    ...breakdownRegels,
     verschuldigde_btw_totaal,
     aftrekbare_btw_totaal,
-    btw_eindsaldo,
-  });
+  };
+
+  const audit = auditReport(
+    processed,
+    {
+      totaal_incl_21: round2(totaal_incl_21),
+      totaal_excl_21: round2(totaal_excl_21),
+      totale_btw_21: round2(totale_btw_21),
+      totaal_incl_9: round2(totaal_incl_9),
+      totaal_excl_9: round2(totaal_excl_9),
+      totale_btw_9: round2(totale_btw_9),
+      verschuldigde_btw_totaal,
+      aftrekbare_btw_totaal,
+      btw_eindsaldo,
+    },
+    overzicht
+  );
 
   return {
     totaal_incl_21: round2(totaal_incl_21),
@@ -1135,15 +1559,8 @@ export function calculateVatReport(
     totale_btw_9: round2(totale_btw_9),
     niet_aftrekbare_btw: round2(niet_aftrekbare_btw),
     btw_eindsaldo,
-    breakdown: {
-      verschuldigde_btw_omzet_21: round2(verschuldigde_btw_omzet_21),
-      verschuldigde_btw_omzet_9: round2(verschuldigde_btw_omzet_9),
-      verlegde_btw_rubriek_2a: round2(verlegde_btw_rubriek_2a),
-      aftrekbare_btw_kosten_21: round2(aftrekbare_btw_kosten_21),
-      aftrekbare_btw_kosten_9: round2(aftrekbare_btw_kosten_9),
-      verschuldigde_btw_totaal,
-      aftrekbare_btw_totaal,
-    },
+    overzicht,
+    breakdown,
     herkenning: {
       totaal_transacties,
       automatisch_herkend,
@@ -1152,6 +1569,8 @@ export function calculateVatReport(
       controle_aanbevolen,
     },
     audit,
+    genegeerde_samenvattingsregels,
+    mogelijke_dubbele_transacties,
     transactions: processed,
   };
 }
@@ -1170,13 +1589,16 @@ function auditReport(
   processed: ProcessedTransaction[],
   totals: {
     totaal_incl_21: number;
+    totaal_excl_21: number;
     totale_btw_21: number;
     totaal_incl_9: number;
+    totaal_excl_9: number;
     totale_btw_9: number;
     verschuldigde_btw_totaal: number;
     aftrekbare_btw_totaal: number;
     btw_eindsaldo: number;
-  }
+  },
+  overzicht: NettoBtwOverzicht
 ): AuditResult {
   const problemen: string[] = [];
 
@@ -1195,13 +1617,31 @@ function auditReport(
     }
   }
 
-  // Check 2: onafhankelijke herberekening van totale_btw_21 / totale_btw_9 vanuit de losse regels.
+  // Controle 1 (aggregaat): Totaal incl. 21% − Totaal excl. 21% − Totale BTW 21% = 0.
+  if (!approxEqual(totals.totaal_incl_21 - totals.totaal_excl_21 - totals.totale_btw_21, 0)) {
+    problemen.push(
+      `Controle 1 faalt: Totaal incl. 21% (${totals.totaal_incl_21}) − Totaal excl. 21% (${totals.totaal_excl_21}) − Totale BTW 21% (${totals.totale_btw_21}) is niet nul.`
+    );
+  }
+  // Controle 2 (aggregaat): Totaal incl. 9% − Totaal excl. 9% − Totale BTW 9% = 0.
+  if (!approxEqual(totals.totaal_incl_9 - totals.totaal_excl_9 - totals.totale_btw_9, 0)) {
+    problemen.push(
+      `Controle 2 faalt: Totaal incl. 9% (${totals.totaal_incl_9}) − Totaal excl. 9% (${totals.totaal_excl_9}) − Totale BTW 9% (${totals.totale_btw_9}) is niet nul.`
+    );
+  }
+
+  // Check: onafhankelijke herberekening van totale_btw_21 / totale_btw_9 vanuit
+  // de losse regels — met dezelfde precisiewaarden als de hoofdberekening
+  // (niet de afgeronde weergavewaarden), anders meldt de audit een vals
+  // "verschil" dat puur door de afrondingsmethode zelf komt.
   const herberekend_btw_21 = round2(
     processed
       .filter((t) => t.rate === 21 && t.classification !== 'verlegd_21')
-      .reduce((sum, t) => sum + t.btw_bedrag, 0)
+      .reduce((sum, t) => sum + t._btw_bedrag_precisie, 0)
   );
-  const herberekend_btw_9 = round2(processed.filter((t) => t.rate === 9).reduce((sum, t) => sum + t.btw_bedrag, 0));
+  const herberekend_btw_9 = round2(
+    processed.filter((t) => t.rate === 9).reduce((sum, t) => sum + t._btw_bedrag_precisie, 0)
+  );
 
   if (!approxEqual(herberekend_btw_21, totals.totale_btw_21)) {
     problemen.push(
@@ -1214,12 +1654,54 @@ function auditReport(
     );
   }
 
-  // Check 3: eindsaldo = verschuldigd - aftrekbaar.
+  // Controle 3 (FISCAAL CORRECTE variant — zie toelichting in de module-
+  // documentatie hierboven over waarom "Totale BTW 21% + Totale BTW 9% −
+  // Totaal aftrekbaar" NIET wordt gebruikt: die mengt verschuldigde en
+  // aftrekbare BTW binnen hetzelfde tarief, wat op elk gemengd bedrijf een
+  // verkeerd eindsaldo oplevert): verschuldigd − aftrekbaar − eindsaldo = 0.
   const herberekend_eindsaldo = round2(totals.verschuldigde_btw_totaal - totals.aftrekbare_btw_totaal);
   if (!approxEqual(herberekend_eindsaldo, totals.btw_eindsaldo)) {
     problemen.push(
-      `Eindsaldo (${totals.btw_eindsaldo}) komt niet overeen met verschuldigd (${totals.verschuldigde_btw_totaal}) min aftrekbaar (${totals.aftrekbare_btw_totaal}).`
+      `Controle 3 (correcte variant) faalt: eindsaldo (${totals.btw_eindsaldo}) komt niet overeen met verschuldigd (${totals.verschuldigde_btw_totaal}) min aftrekbaar (${totals.aftrekbare_btw_totaal}).`
     );
+  }
+
+  // ── Nieuwe, expliciete controles op het LEIDENDE overzicht (verschuldigd/
+  // aftrekbaar gescheiden) — dit zijn de controles die de gebruiker zelf ook
+  // met de getoonde cijfers kan narekenen. ──────────────────────────────────
+
+  // Controle A (verschuldigde BTW): inkomsten_21 + inkomsten_9 + verlegde_btw = verschuldigd.totaal.
+  const herberekendVerschuldigd = round2(
+    overzicht.verschuldigd.inkomsten_21 + overzicht.verschuldigd.inkomsten_9 + overzicht.verschuldigd.verlegde_btw
+  );
+  if (!approxEqual(herberekendVerschuldigd, overzicht.verschuldigd.totaal)) {
+    problemen.push(
+      `Controle A faalt: getoonde verschuldigd-regels (${overzicht.verschuldigd.inkomsten_21} + ${overzicht.verschuldigd.inkomsten_9} + ${overzicht.verschuldigd.verlegde_btw} = ${herberekendVerschuldigd}) tellen niet op tot het getoonde totaal (${overzicht.verschuldigd.totaal}).`
+    );
+  }
+
+  // Controle B (aftrekbare voorbelasting): uitgaven_21 + uitgaven_9 + verlegde_btw = aftrekbaar.totaal.
+  const herberekendAftrekbaar = round2(
+    overzicht.aftrekbaar.uitgaven_21 + overzicht.aftrekbaar.uitgaven_9 + overzicht.aftrekbaar.verlegde_btw
+  );
+  if (!approxEqual(herberekendAftrekbaar, overzicht.aftrekbaar.totaal)) {
+    problemen.push(
+      `Controle B faalt: getoonde aftrekbaar-regels (${overzicht.aftrekbaar.uitgaven_21} + ${overzicht.aftrekbaar.uitgaven_9} + ${overzicht.aftrekbaar.verlegde_btw} = ${herberekendAftrekbaar}) tellen niet op tot het getoonde totaal (${overzicht.aftrekbaar.totaal}).`
+    );
+  }
+
+  // Controle C (eindresultaat): verschuldigd.totaal − aftrekbaar.totaal = netto_btw,
+  // en netto_btw moet exact overeenkomen met het bedrag dat als "af te dragen"/
+  // "terug te vorderen" wordt getoond (in deze engine is dat letterlijk hetzelfde veld).
+  const herberekendNetto = round2(overzicht.verschuldigd.totaal - overzicht.aftrekbaar.totaal);
+  if (!approxEqual(herberekendNetto, overzicht.netto_btw)) {
+    problemen.push(
+      `Controle C faalt: verschuldigd (${overzicht.verschuldigd.totaal}) − aftrekbaar (${overzicht.aftrekbaar.totaal}) = ${herberekendNetto}, wijkt af van het getoonde netto_btw (${overzicht.netto_btw}).`
+    );
+  }
+  const verwachteStatus = overzicht.netto_btw >= 0 ? 'af_te_dragen' : 'terug_te_vorderen';
+  if (overzicht.status !== verwachteStatus) {
+    problemen.push(`Controle C faalt: status "${overzicht.status}" komt niet overeen met het teken van netto_btw (${overzicht.netto_btw}), verwacht "${verwachteStatus}".`);
   }
 
   return { ok: problemen.length === 0, problemen };
@@ -1228,31 +1710,7 @@ function auditReport(
 // ----------------------------------------------------------------------------
 // 7. ESCALATIE — WELKE TRANSACTIES VERDIENEN NOG EXTRA ZOEKWERK
 // ----------------------------------------------------------------------------
-//
-// De 5 classificatielagen + AI-consensus lossen het merendeel automatisch op.
-// Wat overblijft met `zekerheid: 'laag'` heeft geen van die lagen kunnen
-// bevestigen. Voor generieke binnenlandse omzet/inkoop is dat vaak geen
-// probleem: 21% ís dan al het fiscaal juiste antwoord, er ís geen andere
-// regel te vinden. Maar soms is het wél echt onzeker (nieuwe buitenlandse
-// leverancier, onduidelijke rechtsvorm, tegenstrijdige signalen). Deze
-// functie geeft de aanroepende applicatie een expliciete, herbruikbare lijst
-// om GERICHT verder onderzoek op te doen — in plaats van blind te gokken of
-// klakkeloos te accepteren.
-//
-// AANBEVOLEN WERKWIJZE VOOR DE HOST-APP (bv. Google AI Studio):
-//   Ronde 1: calculateVatReport() zonder extra opties — lost het merendeel op.
-//   Ronde 2-N: voor elke `vindEscalatieKandidaten()`-uitkomst, doe 3 nieuwe
-//              onafhankelijke AI-classificaties MET de aanbevolen_zoekacties
-//              als extra context, geef ze mee als aiProposals, reken opnieuw.
-//              Herhaal tot er niets meer bijkomt of tot MAX_AANBEVOLEN_ESCALATIE_RONDES
-//              is bereikt — daarna levert nóg een ronde vrijwel zeker niets meer op.
-//   Laatste redmiddel: wat na die rondes nog steeds `zekerheid: 'laag'` heeft,
-//              krijgt de boekhouder voorgelegd met de 3-knops percentagekeuze
-//              (zie BOEKHOUDER_PERCENTAGE_OPTIES hieronder). Diens keuze gaat
-//              als percentageOverrides mee in de laatste, definitieve
-//              calculateVatReport()-aanroep.
 
-/** Praktische bovengrens: meer automatische zoekrondes leveren doorgaans geen extra zekerheid meer op zodra alle signalen zijn uitgeput. */
 export const MAX_AANBEVOLEN_ESCALATIE_RONDES = 3;
 
 export interface EscalatieKandidaat {
@@ -1261,17 +1719,6 @@ export interface EscalatieKandidaat {
   aanbevolen_zoekacties: string[];
 }
 
-/**
- * Selecteert alle transacties die na de volledige classificatiepijplijn nog
- * `zekerheid: 'laag'` hebben, en geeft per transactie concrete
- * vervolgstappen voor verder (geautomatiseerd) onderzoek. Bedoeld om in een
- * lus te worden gebruikt door de host-applicatie (die wél internet-/
- * AI-toegang heeft): voor elke kandidaat opnieuw classificeren met bredere
- * context, en het resultaat als extra `aiProposals`-stem meegeven aan een
- * volgende `calculateVatReport`-aanroep. Begrens dit praktisch tot een klein
- * aantal rondes (bv. 2-3) — oneindig doorzoeken levert geen extra zekerheid
- * op zodra alle beschikbare signalen al zijn uitgeput.
- */
 export function vindEscalatieKandidaten(report: VatReport): EscalatieKandidaat[] {
   return report.transactions
     .filter(isTwijfelgeval)
@@ -1300,20 +1747,12 @@ export function vindEscalatieKandidaten(report: VatReport): EscalatieKandidaat[]
 // ----------------------------------------------------------------------------
 // 8. LAATSTE REDMIDDEL — DE 3-KNOPS PERCENTAGEKEUZE VOOR DE BOEKHOUDER
 // ----------------------------------------------------------------------------
-//
-// Voor transacties die na alle escalatierondes nog steeds `zekerheid: 'laag'`
-// hebben, toont de UI dit simpele keuzemenu: precies 3 knoppen (0%, 9%,
-// 21%), niets anders — geen aparte classificatie-dropdown, geen handmatige
-// bedragberekening. De boekhouder kiest alleen het tarief; alle rekenwerk
-// (excl./incl.-splitsing, aftrekbaarheid, verwerking in de 8 hoofdtotalen)
-// doet de engine daarna zelf via `percentageOverrides`.
 
 export interface BoekhouderPercentageOptie {
   percentage: BtwPercentage;
   label: string;
 }
 
-/** Canonieke bron voor het 3-knops keuzemenu — gebruik deze array om de UI te bouwen, niet een losse hardcoded lijst. */
 export const BOEKHOUDER_PERCENTAGE_OPTIES: BoekhouderPercentageOptie[] = [
   { percentage: 0, label: '0%' },
   { percentage: 9, label: '9%' },
@@ -1348,27 +1787,15 @@ function toRow(t: ProcessedTransaction): TransactionTableRow {
   };
 }
 
-/** Zet een VatReport om naar de exacte tabelweergave zoals in het voorbeeld (Omschrijving/Bedrag/Type/BTW/Toegepaste regel). */
 export function toTransactionTable(report: VatReport): TransactionTableRow[] {
   return report.transactions.map(toRow);
 }
 
 export interface TweeKolommenWeergave {
-  /** Alles waar de tool achter staat — inclusief AI-consensus en boekhouder-beoordelingen. Toon dit zonder enig voorbehoud, precies zoals bevestigde regels. */
   zeker: TransactionTableRow[];
-  /** Uitsluitend transacties waar `isTwijfelgeval()` true voor is — de enige regels die nog een keuzemenu (0/9/21%) moeten tonen. */
   twijfelgevallen: TransactionTableRow[];
 }
 
-/**
- * Splitst de transactietabel in exact de twee kolommen die de UI moet tonen:
- * "zeker" en "twijfelgevallen" — gebaseerd op de ENE canonieke definitie
- * (`isTwijfelgeval`). Zodra de boekhouder een transactie beoordeelt
- * (percentageOverrides + beoordeeld_door) en de host-app opnieuw rekent,
- * verschijnt die transactie hier automatisch in "zeker" met de toelichting
- * "Door {naam} beoordeeld." — er is geen aparte stap nodig om 'm handmatig
- * van kolom te wisselen.
- */
 export function tweeKolommenWeergave(report: VatReport): TweeKolommenWeergave {
   const zeker: TransactionTableRow[] = [];
   const twijfelgevallen: TransactionTableRow[] = [];

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { api } from "@/api";
 import { useToast } from "@/components/Toast";
 import { Spinner, EmptyState } from "@/components/ui";
@@ -8,6 +8,7 @@ import {
   tweeKolommenWeergave,
   genereerStabielTransactieId,
   BOEKHOUDER_PERCENTAGE_OPTIES,
+  berekenBetrouwbaarheidsscore,
   type VatReport as BtwReport,
   type RawTransaction,
   type BtwPercentage,
@@ -19,9 +20,9 @@ import { processFile } from "@/bridge";
 import type { EngineResult } from "@/bridge";
 import {
   Calculator, FileSpreadsheet, TrendingUp, TrendingDown,
-  Receipt, ArrowDownUp, CheckCircle2, AlertTriangle, Search,
-  FolderOpen, Coins, BookOpen, Globe, UserCheck, Edit2,
-  Filter, RotateCcw
+  ArrowDownUp, CheckCircle2, AlertTriangle, Search,
+  FolderOpen, UserCheck, Edit2,
+  Filter, RotateCcw, ChevronDown, ChevronUp, Info, HelpCircle
 } from "lucide-react";
 import type { FileRow } from "@/types";
 
@@ -46,6 +47,7 @@ export function VatCalculator({ customerId }: { customerId: string }) {
   const [loadingFiles, setLoadingFiles] = useState(true);
   const [calculating, setCalculating] = useState(false);
   const [calc, setCalc] = useState<CalcState>(null);
+  const [showToelichting, setShowToelichting] = useState<boolean>(true);
 
   // Accountant name state & persistence
   const [accountantName, setAccountantName] = useState<string>(() => {
@@ -64,7 +66,7 @@ export function VatCalculator({ customerId }: { customerId: string }) {
   // Filter & Search states for transaction tables
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'income' | 'expense'>("ALL");
-  const [vatFilter, setVatFilter] = useState<'ALL' | '21' | '9' | '0'>("ALL");
+  const [vatFilter, setVatFilter] = useState<'ALL' | '21' | '9' | '0' | 'verlegd' | 'bua' | 'twijfel'>("ALL");
   const [sortOption, setSortOption] = useState<'default' | 'amount_desc' | 'amount_asc' | 'desc_asc'>("default");
 
   const isFilterActive = searchQuery !== "" || typeFilter !== "ALL" || vatFilter !== "ALL" || sortOption !== "default";
@@ -248,47 +250,88 @@ export function VatCalculator({ customerId }: { customerId: string }) {
   };
 
   // Filter & Sort transactions for the tables
-  const filteredTransactions = (calc?.report.transactions || []).filter((tx) => {
-    // Type filter (Inkomsten / Uitgaven)
-    if (typeFilter === 'income' && tx.type !== 'income') return false;
-    if (typeFilter === 'expense' && tx.type !== 'expense') return false;
+  const filteredTransactions = useMemo(() => {
+    if (!calc?.report?.transactions) return [];
 
-    // BTW Percentage filter (21% / 9% / 0%)
-    if (vatFilter === '21' && tx.rate !== 21) return false;
-    if (vatFilter === '9' && tx.rate !== 9) return false;
-    if (vatFilter === '0' && tx.rate !== 0) return false;
+    const rawQuery = searchQuery.trim();
+    const terms = rawQuery
+      ? rawQuery
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .split(/\s+/)
+          .filter(Boolean)
+      : [];
 
-    // Search query on description & applied rule text
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const desc = (tx.description || "").toLowerCase();
-      const rule = (tx.applied_rule?.korte_toelichting || "").toLowerCase();
-      if (!desc.includes(q) && !rule.includes(q)) return false;
-    }
+    return calc.report.transactions.filter((tx) => {
+      if (typeFilter === 'income' && tx.type !== 'income') return false;
+      if (typeFilter === 'expense' && tx.type !== 'expense') return false;
 
-    return true;
-  });
+      if (vatFilter === '21' && tx.rate !== 21) return false;
+      if (vatFilter === '9' && tx.rate !== 9) return false;
+      if (vatFilter === '0' && tx.rate !== 0) return false;
+      if (vatFilter === 'verlegd' && tx.classification !== 'verlegd_21') return false;
+      if (vatFilter === 'bua' && tx.classification !== 'horeca_bua_9') return false;
+      if (vatFilter === 'twijfel' && tx.zekerheid !== 'laag') return false;
 
-  const sortedTransactions = [...filteredTransactions].sort((a, b) => {
-    if (sortOption === 'amount_desc') {
-      return b.amount_incl_input - a.amount_incl_input;
-    }
-    if (sortOption === 'amount_asc') {
-      return a.amount_incl_input - b.amount_incl_input;
-    }
-    if (sortOption === 'desc_asc') {
-      return (a.description || "").localeCompare(b.description || "");
-    }
-    return 0;
-  });
+      if (terms.length > 0) {
+        const searchableText = [
+          tx.description || "",
+          tx.date || "",
+          tx.amount_incl_input ? tx.amount_incl_input.toString() : "",
+          tx.amount_incl_input ? formatEUR(tx.amount_incl_input) : "",
+          tx.bedrag_excl ? formatEUR(tx.bedrag_excl) : "",
+          tx.btw_bedrag ? formatEUR(tx.btw_bedrag) : "",
+          tx.applied_rule?.korte_toelichting || "",
+          tx.applied_rule?.omschrijving || "",
+          tx.applied_rule?.wetsartikel || "",
+          tx.applied_rule?.rubriek || "",
+          tx.herkenningsbron || "",
+          tx.classification || "",
+          `${tx.rate}%`,
+          tx.type === 'income' ? 'inkomsten' : 'uitgaven'
+        ]
+          .join(" ")
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "");
 
-  // Extract two-column dataset directly from btwEngine using filtered & sorted transactions
-  const filteredReport = calc ? {
-    ...calc.report,
-    transactions: sortedTransactions,
-  } : null;
+        for (const term of terms) {
+          if (!searchableText.includes(term)) return false;
+        }
+      }
 
-  const kolommen = filteredReport ? tweeKolommenWeergave(filteredReport) : { zeker: [], twijfelgevallen: [] };
+      return true;
+    });
+  }, [calc?.report?.transactions, typeFilter, vatFilter, searchQuery]);
+
+  const sortedTransactions = useMemo(() => {
+    return [...filteredTransactions].sort((a, b) => {
+      if (sortOption === 'amount_desc') {
+        return b.amount_incl_input - a.amount_incl_input;
+      }
+      if (sortOption === 'amount_asc') {
+        return a.amount_incl_input - b.amount_incl_input;
+      }
+      if (sortOption === 'desc_asc') {
+        return (a.description || "").localeCompare(b.description || "");
+      }
+      return 0;
+    });
+  }, [filteredTransactions, sortOption]);
+
+  const filteredReport = useMemo(() => {
+    return calc ? {
+      ...calc.report,
+      transactions: sortedTransactions,
+    } : null;
+  }, [calc, sortedTransactions]);
+
+  const kolommen = useMemo(() => {
+    return filteredReport ? tweeKolommenWeergave(filteredReport) : { zeker: [], twijfelgevallen: [] };
+  }, [filteredReport]);
+
+  const overzicht = calc?.report?.overzicht;
 
   return (
     <div className="space-y-4">
@@ -298,7 +341,7 @@ export function VatCalculator({ customerId }: { customerId: string }) {
           <div className="flex-1">
             <h3 className="text-sm font-semibold text-ink-900 mb-1">BTW-calculator</h3>
             <p className="text-xs text-ink-400">
-              Selecteer een jaar en kwartaal. Het door de klant geüploade CSV-bestand voor deze periode wordt automatisch berekend volgens de Nederlandse belastingregels.
+              Selecteer een jaar en kwartaal. Het geüploade bankoverzicht voor deze periode wordt berekend op basis van `report.overzicht`.
             </p>
           </div>
           <div className="flex gap-3">
@@ -338,7 +381,7 @@ export function VatCalculator({ customerId }: { customerId: string }) {
           <EmptyState
             icon={FileSpreadsheet}
             title={`Geen bankoverzicht voor ${quarter} ${year}`}
-            subtitle="Bonnen en facturen worden uitsluitend als document bewaard en niet door de BTW-engine verwerkt. Upload een 'Bankoverzicht Inkomsten en uitgaven' (.csv / .txt) voor deze periode om de BTW-calculator te gebruiken."
+            subtitle="Upload een 'Bankoverzicht Inkomsten en uitgaven' (.csv / .txt) voor deze periode om de BTW-calculator te gebruiken."
           />
         </div>
       ) : null}
@@ -352,9 +395,8 @@ export function VatCalculator({ customerId }: { customerId: string }) {
       )}
 
       {/* Results */}
-      {!calculating && calc && (
+      {!calculating && calc && overzicht && (
         <div className="animate-fade-in space-y-4">
-          {/* STAP 4 — 8 KERN-METRICS KAARTEN */}
           <div className="card p-6">
             <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
               <div className="flex items-center gap-2">
@@ -369,8 +411,12 @@ export function VatCalculator({ customerId }: { customerId: string }) {
                 </div>
               </div>
 
-              {/* Accountant Info Badge */}
-              <div className="flex items-center gap-3">
+              {/* Accountant Info & Reliability Score Badge */}
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-brand-50 rounded-lg border border-brand-200 text-xs text-brand-800 font-semibold">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-brand-600" />
+                  <span>Betrouwbaarheid: {berekenBetrouwbaarheidsscore(calc.report).toFixed(1)}%</span>
+                </div>
                 <div className="flex items-center gap-1.5 px-3 py-1.5 bg-ink-50 rounded-lg border border-ink-200 text-xs text-ink-700">
                   <UserCheck className="h-3.5 w-3.5 text-brand-600" />
                   <span>Beoordeeld door: <strong>{accountantName || "Nog niet ingesteld"}</strong></span>
@@ -381,7 +427,7 @@ export function VatCalculator({ customerId }: { customerId: string }) {
                       setPendingTxReview(null);
                       setShowNameModal(true);
                     }}
-                    className="ml-1 text-brand-600 hover:text-brand-700 p-0.5"
+                    className="ml-1 text-brand-600 hover:text-brand-700 p-0.5 cursor-pointer"
                     title="Naam wijzigen"
                   >
                     <Edit2 className="h-3 w-3" />
@@ -393,128 +439,206 @@ export function VatCalculator({ customerId }: { customerId: string }) {
               </div>
             </div>
 
-            {/* 8 fiscaal gevalideerde BTW aftekenvelden uit VatReport */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-              <MetricCard
-                icon={<Coins className="h-4 w-4" />}
-                label="Totaal incl. 21% BTW"
-                value={formatEUR(calc.report.totaal_incl_21)}
-                sub={`Excl. 21% BTW: ${formatEUR(calc.report.totaal_excl_21)}`}
-              />
-              <MetricCard
-                icon={<TrendingUp className="h-4 w-4" />}
-                label="Totaal excl. 21% BTW"
-                value={formatEUR(calc.report.totaal_excl_21)}
-                sub="Grondslag 21% BTW"
-              />
-              <MetricCard
-                icon={<Coins className="h-4 w-4" />}
-                label="Totaal incl. 9% BTW"
-                value={formatEUR(calc.report.totaal_incl_9)}
-                sub={`Excl. 9% BTW: ${formatEUR(calc.report.totaal_excl_9)}`}
-              />
-              <MetricCard
-                icon={<TrendingDown className="h-4 w-4" />}
-                label="Totaal excl. 9% BTW"
-                value={formatEUR(calc.report.totaal_excl_9)}
-                sub="Grondslag 9% BTW"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-              <MetricCard
-                icon={<Receipt className="h-4 w-4" />}
-                label="Totale BTW 21%"
-                value={formatEUR(calc.report.totale_btw_21)}
-                sub="Berekend op 21% tarief"
-                highlight
-              />
-              <MetricCard
-                icon={<BookOpen className="h-4 w-4" />}
-                label="Totale BTW 9%"
-                value={formatEUR(calc.report.totale_btw_9)}
-                sub="Berekend op 9% tarief"
-              />
-              <MetricCard
-                icon={<AlertTriangle className="h-4 w-4" />}
-                label="Niet-aftrekbare BTW"
-                value={formatEUR(calc.report.niet_aftrekbare_btw)}
-                sub="BUA / Horeca (Art. 15 lid 5)"
-                muted
-              />
-              <MetricCard
-                icon={<CheckCircle2 className="h-4 w-4" />}
-                label="Totaal aftrekbaar"
-                value={formatEUR(calc.report.breakdown.aftrekbare_btw_totaal)}
-                sub="Rubriek 5b"
-                highlight
-              />
-            </div>
-
-            {/* Metric 8: Eindsaldo */}
-            <div className={`rounded-lg border p-5 ${
-              calc.report.btw_eindsaldo > 0
-                ? "border-danger-200 bg-danger-50"
-                : calc.report.btw_eindsaldo < 0
-                  ? "border-success-200 bg-success-50"
-                  : "border-ink-200 bg-ink-50/50"
-            }`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className={`text-xs font-medium mb-1 flex items-center gap-1.5 ${
-                    calc.report.btw_eindsaldo > 0 ? "text-danger-700" : "text-ink-500"
-                  }`}>
-                    <ArrowDownUp className="h-4 w-4" /> BTW Eindsaldo
-                  </p>
-                  <p className="text-xs text-ink-500">Totale BTW terug te vorderen / af te dragen</p>
+            {/* DEEL 5 — VALIDATIE IN DE FRONTEND: Toon report.audit.ok als false */}
+            {!calc.report.audit.ok && (
+              <div className="mb-5 p-4 rounded-lg bg-danger-50 border border-danger-200 text-danger-900 space-y-2">
+                <div className="flex items-center gap-2 font-bold text-sm text-danger-800">
+                  <AlertTriangle className="h-5 w-5 text-danger-600 shrink-0" />
+                  <span>Audit controle mislukt (report.audit.ok = false)</span>
                 </div>
-                <div className="text-right">
-                  <p className={`text-3xl font-semibold tabular-nums ${
-                    calc.report.btw_eindsaldo > 0 ? "text-danger-700" : "text-success-700"
-                  }`}>
-                    {formatEUR(calc.report.btw_eindsaldo)}
+                <p className="text-xs text-danger-700">
+                  De automatische zelfcontrole heeft de volgende inconsistenties gevonden in de berekening:
+                </p>
+                <ul className="list-disc pl-5 text-xs space-y-1 font-mono text-danger-900">
+                  {calc.report.audit.problemen.map((prob, idx) => (
+                    <li key={idx}>{prob}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Mogelijke dubbele transacties */}
+            {calc.report.mogelijke_dubbele_transacties.length > 0 && (
+              <div className="mb-5 p-4 rounded-lg bg-warning-50 border border-warning-200 space-y-1 text-warning-900">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-warning-600 shrink-0" />
+                  <p className="text-xs font-bold uppercase tracking-wider">
+                    Mogelijke dubbele transacties gesignaleerd ({calc.report.mogelijke_dubbele_transacties.length})
                   </p>
-                  <p className="text-xs mt-1">
-                    {calc.report.btw_eindsaldo > 0 ? (
-                      <span className="text-danger-600 flex items-center gap-1 justify-end">
-                        <Receipt className="h-3.5 w-3.5" /> Te betalen aan Belastingdienst
-                      </span>
-                    ) : calc.report.btw_eindsaldo < 0 ? (
-                      <span className="text-success-600 flex items-center gap-1 justify-end">
-                        <CheckCircle2 className="h-3.5 w-3.5" /> Terug te vorderen van Belastingdienst
-                      </span>
-                    ) : (
-                      <span className="text-ink-400">Neutraal</span>
-                    )}
-                  </p>
+                </div>
+                <p className="text-xs text-warning-800">
+                  De volgende transacties hebben een gelijke datum, omschrijving en bedrag. Beide zijn apart verwerkt in de berekening (niet automatisch samengevoegd):
+                </p>
+                <ul className="text-xs space-y-1 pl-5 list-disc text-warning-900 mt-1">
+                  {calc.report.mogelijke_dubbele_transacties.map((dub, idx) => (
+                    <li key={idx}>
+                      <strong>{dub.datum || "Geen datum"}</strong> — {dub.omschrijving} ({formatEUR(dub.bedrag)})
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* DEEL 4 — LEIDENDE BTW-WEERGAVE VIA REPORT.OVERZICHT */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+              {/* SECTIE: BTW over inkomsten (verschuldigd) */}
+              <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-xs flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center gap-2 mb-4 pb-2 border-b border-ink-100">
+                    <TrendingUp className="h-4 w-4 text-brand-600 shrink-0" />
+                    <h4 className="text-sm font-bold text-ink-900">
+                      BTW over inkomsten (verschuldigd)
+                    </h4>
+                  </div>
+                  <div className="space-y-2.5 text-xs text-ink-700">
+                    <div className="flex items-center justify-between">
+                      <span className="text-ink-600">21% BTW over inkomsten:</span>
+                      <span className="font-medium tabular-nums text-ink-900">{formatEUR(overzicht.verschuldigd.inkomsten_21)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-ink-600">9% BTW over inkomsten:</span>
+                      <span className="font-medium tabular-nums text-ink-900">{formatEUR(overzicht.verschuldigd.inkomsten_9)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-ink-600">Verlegde BTW (buitenlandse diensten):</span>
+                      <span className="font-medium tabular-nums text-ink-900">{formatEUR(overzicht.verschuldigd.verlegde_btw)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-3 border-t-2 border-ink-200 flex items-center justify-between bg-brand-50/50 p-2.5 rounded-lg">
+                  <span className="text-xs font-bold text-brand-900">Totaal verschuldigd:</span>
+                  <span className="text-sm font-bold tabular-nums text-brand-700">{formatEUR(overzicht.verschuldigd.totaal)}</span>
+                </div>
+              </div>
+
+              {/* SECTIE: BTW over uitgaven (aftrekbaar) */}
+              <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-xs flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center gap-2 mb-4 pb-2 border-b border-ink-100">
+                    <TrendingDown className="h-4 w-4 text-success-600 shrink-0" />
+                    <h4 className="text-sm font-bold text-ink-900">
+                      BTW over uitgaven (aftrekbaar)
+                    </h4>
+                  </div>
+                  <div className="space-y-2.5 text-xs text-ink-700">
+                    <div className="flex items-center justify-between">
+                      <span className="text-ink-600">21% aftrekbare BTW over uitgaven:</span>
+                      <span className="font-medium tabular-nums text-ink-900">{formatEUR(overzicht.aftrekbaar.uitgaven_21)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-ink-600">9% aftrekbare BTW over uitgaven:</span>
+                      <span className="font-medium tabular-nums text-ink-900">{formatEUR(overzicht.aftrekbaar.uitgaven_9)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-ink-600">Verlegde BTW (aftrekbaar):</span>
+                      <span className="font-medium tabular-nums text-ink-900">{formatEUR(overzicht.aftrekbaar.verlegde_btw)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-3 border-t-2 border-ink-200 flex items-center justify-between bg-success-50/50 p-2.5 rounded-lg">
+                  <span className="text-xs font-bold text-success-900">Totaal aftrekbare voorbelasting:</span>
+                  <span className="text-sm font-bold tabular-nums text-success-700">{formatEUR(overzicht.aftrekbaar.totaal)}</span>
                 </div>
               </div>
             </div>
 
+            {/* INFORMATIEF EXTRAATJE */}
+            <div className="mb-6 p-3.5 rounded-lg bg-ink-50 border border-ink-200 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2 text-ink-700">
+                <Info className="h-4 w-4 text-ink-500 shrink-0" />
+                <span>Niet-aftrekbare BTW (BUA/horeca):</span>
+                <span className="text-ink-400 text-[11px]">(Informatief extraatje — geen onderdeel van bovenstaande optelling)</span>
+              </div>
+              <span className="font-semibold text-ink-900 tabular-nums">{formatEUR(overzicht.niet_aftrekbaar_ter_info)}</span>
+            </div>
+
+            {/* SECTIE: Af te dragen / Terug te vorderen (eindresultaat, prominent) */}
+            <div className={`rounded-xl border p-6 transition-colors ${
+              overzicht.status === 'af_te_dragen'
+                ? "border-danger-300 bg-danger-50/70"
+                : "border-success-300 bg-success-50/70"
+            }`}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <ArrowDownUp className={`h-5 w-5 ${
+                      overzicht.status === 'af_te_dragen' ? "text-danger-600" : "text-success-600"
+                    }`} />
+                    <span className={`text-xs font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${
+                      overzicht.status === 'af_te_dragen'
+                        ? "bg-danger-100 text-danger-800 border-danger-200"
+                        : "bg-success-100 text-success-800 border-success-200"
+                    }`}>
+                      {overzicht.status === 'af_te_dragen' ? "Af te dragen" : "Terug te vorderen"}
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-bold text-ink-900 mt-2">
+                    {overzicht.status === 'af_te_dragen' ? "Af te dragen aan Belastingdienst" : "Terug te vorderen van Belastingdienst"}
+                  </h3>
+                  <p className="text-xs text-ink-500 mt-0.5">
+                    Definitieve netto BTW-positie op basis van report.overzicht
+                  </p>
+                </div>
+
+                <div className="text-left sm:text-right">
+                  <p className={`text-3xl font-extrabold tabular-nums ${
+                    overzicht.status === 'af_te_dragen' ? "text-danger-700" : "text-success-700"
+                  }`}>
+                    {formatEUR(Math.abs(overzicht.netto_btw))}
+                  </p>
+                  <p className="text-xs font-medium text-ink-500 mt-1">
+                    Netto BTW ({overzicht.status === 'af_te_dragen' ? "te betalen" : "te ontvangen"})
+                  </p>
+                </div>
+              </div>
+
+              {/* Uitklapbaar/zichtbaar blok met toelichting uit overzicht.toelichting */}
+              <div className="mt-5 pt-4 border-t border-ink-200/60">
+                <button
+                  type="button"
+                  onClick={() => setShowToelichting(!showToelichting)}
+                  className="flex items-center justify-between w-full text-xs font-semibold text-ink-700 hover:text-ink-900 cursor-pointer"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <HelpCircle className="h-3.5 w-3.5 text-brand-600" />
+                    Specificatie & Toelichting (Kant-en-klaar)
+                  </span>
+                  {showToelichting ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </button>
+
+                {showToelichting && (
+                  <div className="mt-3 p-4 rounded-lg bg-white/80 border border-ink-200/80 text-xs font-mono text-ink-800 whitespace-pre-wrap leading-relaxed shadow-2xs">
+                    {overzicht.toelichting}
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Summary bar */}
-            <div className="mt-4 pt-4 border-t border-ink-100 grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <div className="mt-6 pt-4 border-t border-ink-100 grid grid-cols-2 sm:grid-cols-3 gap-4">
               <div>
                 <p className="text-xs text-ink-500 mb-1 flex items-center gap-1"><FolderOpen className="h-3 w-3" /> Totaal verwerkt</p>
                 <p className="text-sm font-semibold text-ink-800 tabular-nums">{calc.report.herkenning.totaal_transacties} regels</p>
               </div>
               <div>
-                <p className="text-xs text-ink-500 mb-1 flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> Twijfelgevallen</p>
+                <p className="text-xs text-ink-500 mb-1 flex items-center gap-1"><AlertTriangle className="h-3 w-3 text-warning-600" /> Twijfelgevallen</p>
                 <p className={`text-sm font-semibold tabular-nums ${kolommen.twijfelgevallen.length > 0 ? "text-warning-700" : "text-ink-800"}`}>
                   {kolommen.twijfelgevallen.length} {kolommen.twijfelgevallen.length === 1 ? "regel" : "regels"}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-ink-500 mb-1 flex items-center gap-1"><Globe className="h-3 w-3" /> Btw Verlegd (EU/Buitenland)</p>
+                <p className="text-xs text-ink-500 mb-1 flex items-center gap-1"><CheckCircle2 className="h-3 w-3 text-brand-600" /> Genegeerde samenvattingen</p>
                 <p className="text-sm font-semibold text-ink-800 tabular-nums">
-                  {formatEUR(calc.report.breakdown.verlegde_btw_rubriek_2a)}
+                  {calc.report.genegeerde_samenvattingsregels?.length || 0} {calc.report.genegeerde_samenvattingsregels?.length === 1 ? "regel" : "regels"}
                 </p>
               </div>
             </div>
           </div>
 
-          {/* STAP 3 — TWEE KOLOMMEN WEERGAVE (TWIJFELGEVALLEN + ZEKER) */}
+          {/* TRANSACTIETABELLEN & FILTERING */}
           <div className="space-y-4">
-            {/* FILTER BALK VOOR TRANSACTIETABEL */}
             <div className="card p-4 bg-white border border-ink-200 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
@@ -544,19 +668,17 @@ export function VatCalculator({ customerId }: { customerId: string }) {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                {/* Zoek op omschrijving */}
                 <div className="relative">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-ink-400" />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Zoek omschrijving..."
+                    placeholder="Zoek omschrijving, bedrag, regel, rubriek..."
                     className="input pl-8 py-1.5 text-xs w-full"
                   />
                 </div>
 
-                {/* Filter op Type (Inkomsten / Uitgaven) */}
                 <div>
                   <select
                     value={typeFilter}
@@ -569,21 +691,22 @@ export function VatCalculator({ customerId }: { customerId: string }) {
                   </select>
                 </div>
 
-                {/* Filter op Percentage (21% / 9% / 0%) */}
                 <div>
                   <select
                     value={vatFilter}
-                    onChange={(e) => setVatFilter(e.target.value as 'ALL' | '21' | '9' | '0')}
+                    onChange={(e) => setVatFilter(e.target.value as any)}
                     className="input py-1.5 text-xs w-full"
                   >
-                    <option value="ALL">Alle BTW-tarieven (21%, 9%, 0%)</option>
+                    <option value="ALL">Alle BTW-tarieven & Categorieën</option>
                     <option value="21">21% BTW</option>
                     <option value="9">9% BTW</option>
                     <option value="0">0% BTW / Vrijgesteld</option>
+                    <option value="verlegd">BTW Verlegd (21%)</option>
+                    <option value="bua">Horeca / BUA (niet aftrekbaar)</option>
+                    <option value="twijfel">Alleen Twijfelgevallen</option>
                   </select>
                 </div>
 
-                {/* Sorteren op Hoogte (Bedrag / Prijs) */}
                 <div>
                   <select
                     value={sortOption}
@@ -599,7 +722,6 @@ export function VatCalculator({ customerId }: { customerId: string }) {
               </div>
             </div>
 
-            {/* Empty state when active filters produce 0 matches */}
             {isFilterActive && sortedTransactions.length === 0 && (
               <div className="card p-8 text-center bg-white border border-ink-200">
                 <p className="text-sm font-semibold text-ink-800 mb-1">Geen transacties gevonden</p>
@@ -613,7 +735,8 @@ export function VatCalculator({ customerId }: { customerId: string }) {
                 </button>
               </div>
             )}
-            {/* SECTIE 1: TWIJFELGEVALLEN */}
+
+            {/* SECTIE: TWIJFELGEVALLEN */}
             {kolommen.twijfelgevallen.length > 0 && (
               <div className="card overflow-hidden border-warning-200">
                 <div className="border-b border-warning-100 bg-warning-50/60 px-5 py-3 flex items-center justify-between">
@@ -662,8 +785,6 @@ export function VatCalculator({ customerId }: { customerId: string }) {
                             </td>
                             <td className="px-4 py-3 max-w-[360px]">
                               <p className="text-xs text-warning-800 font-medium mb-1.5">{row.toegepaste_regel}</p>
-
-                              {/* 3-KNOPS BOEKHOUDER PERCENTAGE OPTIES */}
                               <div className="flex items-center gap-2">
                                 <span className="text-[11px] text-ink-500 font-medium">Kies tarief:</span>
                                 <div className="inline-flex gap-1.5">
@@ -689,7 +810,7 @@ export function VatCalculator({ customerId }: { customerId: string }) {
               </div>
             )}
 
-            {/* SECTIE 2: ZEKER */}
+            {/* SECTIE: ZEKER */}
             <div className="card overflow-hidden">
               <div className="border-b border-ink-100 px-5 py-3 flex items-center justify-between bg-ink-50/50">
                 <div>
@@ -804,14 +925,14 @@ export function VatCalculator({ customerId }: { customerId: string }) {
               <button
                 type="button"
                 onClick={() => setShowNameModal(false)}
-                className="btn-secondary text-xs"
+                className="btn-secondary text-xs cursor-pointer"
               >
                 Annuleren
               </button>
               <button
                 type="button"
                 onClick={handleConfirmNameModal}
-                className="btn-primary text-xs"
+                className="btn-primary text-xs cursor-pointer"
               >
                 Opslaan & Toepassen
               </button>
@@ -819,31 +940,6 @@ export function VatCalculator({ customerId }: { customerId: string }) {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function MetricCard({ icon, label, value, sub, highlight, muted }: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  sub?: string;
-  highlight?: boolean;
-  muted?: boolean;
-}) {
-  return (
-    <div className={`rounded-lg border p-4 ${
-      highlight ? "border-brand-200 bg-brand-50/50"
-      : muted ? "border-ink-200 bg-ink-50/30"
-      : "border-ink-200 bg-ink-50/50"
-    }`}>
-      <p className="text-xs text-ink-500 mb-2 flex items-center gap-1.5">{icon} {label}</p>
-      <p className={`text-xl font-semibold tabular-nums ${
-        highlight ? "text-brand-700" : muted ? "text-ink-500" : "text-ink-900"
-      }`}>
-        {value}
-      </p>
-      {sub && <p className="text-xs text-ink-400 mt-1">{sub}</p>}
     </div>
   );
 }

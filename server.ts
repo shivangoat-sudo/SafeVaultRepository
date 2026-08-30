@@ -385,7 +385,7 @@ async function startServer() {
     if (!reqUser) return false;
     if (reqUser.role === "owner") return true;
     const { data: note } = await supabase
-      .from("notes")
+      .from("user_notes")
       .select("customer_id")
       .eq("id", noteId)
       .single();
@@ -579,6 +579,7 @@ async function startServer() {
       );
       const isExempt =
         candidateAccount.role === "customer" ||
+        candidateAccount.role === "owner" ||
         String(candidateAccount.number).startsWith("6");
       console.log(
         JSON.stringify({
@@ -637,6 +638,7 @@ async function startServer() {
       }
       const isExemptFrom2FA =
         candidateAccount.role === "customer" ||
+        candidateAccount.role === "owner" ||
         String(candidateAccount.number).startsWith("6");
       if (isExemptFrom2FA) {
         await supabase
@@ -1104,7 +1106,7 @@ async function startServer() {
   function extractFolderAndAttachmentsFromBody(body: string) {
     const attachments: any[] = [];
     const attachmentRegex =
-      /\uD83D\uDCCE\s*\[attachment:([^:]+):([^:]+):([^:]+):([^\]]+)\]/g;
+      /\uD83D\uDCCE\s*\[attachment:([^:]+):(.+):(\d+):([^\]]+)\]/g;
     let match;
 
     while ((match = attachmentRegex.exec(body)) !== null) {
@@ -1185,7 +1187,7 @@ async function startServer() {
 
     if (user.role === "customer") {
       const { data, error: queryError } = await supabase
-        .from("notes")
+        .from("user_notes")
         .select("*")
         .eq("customer_id", customerId)
         .eq("visible_to_customer", true)
@@ -1193,7 +1195,7 @@ async function startServer() {
       if (queryError) {
         if (queryError.code === "42703" || queryError.code === "PGRST204") {
           const { data: fallbackData, error: fallbackError } = await supabase
-            .from("notes")
+            .from("user_notes")
             .select("*")
             .eq("customer_id", customerId)
             .order("created_at", { ascending: false });
@@ -1208,7 +1210,7 @@ async function startServer() {
       }
     } else {
       const { data, error: queryError } = await supabase
-        .from("notes")
+        .from("user_notes")
         .select("*")
         .eq("customer_id", customerId)
         .order("created_at", { ascending: false });
@@ -1241,50 +1243,66 @@ async function startServer() {
   });
 
   app.post("/api/dossier/:customerId/notes", requireAuth, async (req, res) => {
-    const { customerId } = req.params;
+    let { customerId } = req.params;
     const user = req.user;
+    if (customerId === "self") {
+      customerId = user.id;
+    }
     if (!(await canAccessCustomer(user, customerId))) {
       return res.status(404).json({ error: "Dossier niet gevonden." });
-    }
-    if (user.role === "customer" || user.role === "organization") {
-      return res
-        .status(403)
-        .json({ error: "Klanten kunnen geen notities aanmaken." });
     }
     const {
       title,
       body: originalBody,
       visibleToCustomer,
       attachments,
+      filePath,
+      fileName,
+      fileSize,
+      mimeType,
     } = req.body;
-    if (!title && !originalBody)
+    if (!title && !originalBody && (!attachments || attachments.length === 0) && !filePath)
       return res.status(400).json({ error: "Titel of inhoud is verplicht." });
+
+    let finalAttachments = attachments || [];
+    if (finalAttachments.length === 0 && filePath) {
+      finalAttachments = [
+        {
+          filePath,
+          fileName: fileName || "Bijlage",
+          fileSize: fileSize || 0,
+          mimeType: mimeType || "application/octet-stream",
+        },
+      ];
+    }
 
     const body = injectFolderAndAttachmentsIntoBody(
       originalBody || "",
-      attachments || [],
+      finalAttachments,
       null,
     );
 
-    const insertData = {
+    const insertData: any = {
       customer_id: customerId,
       user_id: user.id,
       title: title || "",
       body: body || "",
     };
-    if (typeof visibleToCustomer === "boolean") {
+    if (user.role === "customer") {
+      insertData.visible_to_customer = true;
+    } else if (typeof visibleToCustomer === "boolean") {
       insertData.visible_to_customer = visibleToCustomer;
     }
 
     let { data: note, error } = await supabase
-      .from("notes")
+      .from("user_notes")
       .insert(insertData)
       .select()
       .single();
     if (error && (error.code === "42703" || error.code === "PGRST204")) {
       delete insertData.visible_to_customer;
       const retryRes = await supabase
-        .from("notes")
+        .from("user_notes")
         .insert(insertData)
         .select()
         .single();
@@ -1327,11 +1345,6 @@ async function startServer() {
   app.put("/api/dossier/notes/:noteId", requireAuth, async (req, res) => {
     const { noteId } = req.params;
     const user = req.user;
-    if (user.role === "customer" || user.role === "organization") {
-      return res
-        .status(403)
-        .json({ error: "Klanten kunnen geen notities bewerken." });
-    }
     if (!(await canAccessNoteId(user, noteId))) {
       return res.status(404).json({ error: "Notitie niet gevonden." });
     }
@@ -1340,11 +1353,15 @@ async function startServer() {
       body: originalBody,
       visibleToCustomer,
       attachments,
+      filePath,
+      fileName,
+      fileSize,
+      mimeType,
     } = req.body;
 
     // Check if existing note has an archive_folder_id to preserve it
     const { data: existingNote } = await supabase
-      .from("notes")
+      .from("user_notes")
       .select("body")
       .eq("id", noteId)
       .single();
@@ -1352,11 +1369,23 @@ async function startServer() {
       ? extractFolderAndAttachmentsFromBody(existingNote.body || "").archive_folder_id
       : null;
 
+    let finalAttachments = attachments;
+    if (finalAttachments === undefined && filePath) {
+      finalAttachments = [
+        {
+          filePath,
+          fileName: fileName || "Bijlage",
+          fileSize: fileSize || 0,
+          mimeType: mimeType || "application/octet-stream",
+        },
+      ];
+    }
+
     let finalBody = originalBody || "";
-    if (attachments !== undefined || existingFolder) {
+    if (finalAttachments !== undefined || existingFolder) {
       finalBody = injectFolderAndAttachmentsIntoBody(
         originalBody || "",
-        attachments || [],
+        finalAttachments || [],
         existingFolder,
       );
     }
@@ -1371,7 +1400,7 @@ async function startServer() {
     }
 
     let { data: note, error } = await supabase
-      .from("notes")
+      .from("user_notes")
       .update(updateData)
       .eq("id", noteId)
       .select()
@@ -1379,7 +1408,7 @@ async function startServer() {
     if (error && (error.code === "42703" || error.code === "PGRST204")) {
       delete updateData.visible_to_customer;
       const retryRes = await supabase
-        .from("notes")
+        .from("user_notes")
         .update(updateData)
         .eq("id", noteId)
         .select()
@@ -1441,7 +1470,7 @@ async function startServer() {
 
       // Fetch note
       const { data: note, error: noteErr } = await supabase
-        .from("notes")
+        .from("user_notes")
         .select("*")
         .eq("id", noteId)
         .single();
@@ -1473,7 +1502,7 @@ async function startServer() {
 
       // Perform atomic update
       const { data: updatedNote, error: updateErr } = await supabase
-        .from("notes")
+        .from("user_notes")
         .update({
           body: updatedBody,
           updated_at: new Date().toISOString(),
@@ -1520,7 +1549,7 @@ async function startServer() {
 
       // Fetch note
       const { data: note, error: noteErr } = await supabase
-        .from("notes")
+        .from("user_notes")
         .select("*")
         .eq("id", noteId)
         .single();
@@ -1541,7 +1570,7 @@ async function startServer() {
 
       // Perform atomic update
       const { data: updatedNote, error: updateErr } = await supabase
-        .from("notes")
+        .from("user_notes")
         .update({
           body: updatedBody,
           updated_at: new Date().toISOString(),
@@ -1574,16 +1603,11 @@ async function startServer() {
   app.delete("/api/dossier/notes/:noteId", requireAuth, async (req, res) => {
     const { noteId } = req.params;
     const user = req.user;
-    if (user.role === "customer" || user.role === "organization") {
-      return res
-        .status(403)
-        .json({ error: "Klanten kunnen geen notities verwijderen." });
-    }
     if (!(await canAccessNoteId(user, noteId))) {
       return res.status(404).json({ error: "Notitie niet gevonden." });
     }
     const { error } = await supabase
-      .from("notes")
+      .from("user_notes")
       .delete()
       .eq("id", noteId);
     if (error) return res.status(500).json({ error: error.message });
@@ -1598,15 +1622,13 @@ async function startServer() {
     requireAuth,
     upload.single("file"),
     async (req, res) => {
-      const { customerId } = req.params;
+      let { customerId } = req.params;
       const user = req.user;
+      if (customerId === "self") {
+        customerId = user.id;
+      }
       if (!(await canAccessCustomer(user, customerId))) {
         return res.status(404).json({ error: "Dossier niet gevonden." });
-      }
-      if (user.role === "customer" || user.role === "organization") {
-        return res
-          .status(403)
-          .json({ error: "Klanten kunnen hier geen bestanden uploaden." });
       }
       const file = req.file;
       if (!file) {
@@ -2089,7 +2111,7 @@ async function startServer() {
       foldersQuery,
       filesQuery,
       supabase
-        .from("notes")
+        .from("user_notes")
         .select("*")
         .eq("customer_id", customerId)
         .order("created_at", { ascending: false }),
@@ -2156,16 +2178,30 @@ async function startServer() {
       foldersQuery = foldersQuery.is("parent_id", null);
       filesQuery = filesQuery.is("folder_id", null);
     }
-    const [foldersRes, filesRes, notesRes] = await Promise.all([
-      foldersQuery,
-      filesQuery,
-      supabase
-        .from("notes")
+    let notesRes: any = { data: [], error: null };
+    if (user.role === "customer") {
+      const { data, error } = await supabase
+        .from("user_notes")
         .select("*")
         .eq("customer_id", user.id)
         .eq("visible_to_customer", true)
-        .order("created_at", { ascending: false }),
-    ]);
+        .order("created_at", { ascending: false });
+      if (error && (error.code === "42703" || error.code === "PGRST204")) {
+        notesRes = await supabase
+          .from("user_notes")
+          .select("*")
+          .eq("customer_id", user.id)
+          .order("created_at", { ascending: false });
+      } else {
+        notesRes = { data, error };
+      }
+    } else {
+      notesRes = await supabase
+        .from("user_notes")
+        .select("*")
+        .eq("customer_id", user.id)
+        .order("created_at", { ascending: false });
+    }
     const sbFolders = foldersRes.data || [];
     const sbFiles = filesRes.data || [];
     const allNotes = (notesRes.data || []).map((n) => {
@@ -2295,14 +2331,14 @@ async function startServer() {
 
         // Detach any notes linked to this folder
         const { data: notesInFolder } = await supabase
-          .from("notes")
+          .from("user_notes")
           .select("id, body")
           .ilike("body", `%[archive_folder:${fId}]%`);
         if (notesInFolder && notesInFolder.length > 0) {
           for (const n of notesInFolder) {
             const { attachments, cleanBody } = extractFolderAndAttachmentsFromBody(n.body || "");
             const restoredBody = injectFolderAndAttachmentsIntoBody(cleanBody, attachments, null);
-            await supabase.from("notes").update({ body: restoredBody }).eq("id", n.id);
+            await supabase.from("user_notes").update({ body: restoredBody }).eq("id", n.id);
           }
         }
 
@@ -4136,6 +4172,10 @@ ${finalBody}`,
       );
     if (error) return res.status(500).json({ error: error.message });
     await supabase
+      .from("accounts")
+      .update({ status: "active", failed_attempts: 0 })
+      .eq("id", userId);
+    await supabase
       .from("access_logs")
       .insert({
         account_id: userId,
@@ -4199,9 +4239,9 @@ ${finalBody}`,
       } catch (e) {}
       try {
         await supabase
-          .from("notes")
+          .from("user_notes")
           .delete()
-          .or(`user_id.eq.${tid},account_id.eq.${tid}`);
+          .or(`user_id.eq.${tid},customer_id.eq.${tid}`);
       } catch (e) {}
       try {
         await supabase.from("btw_calculations").delete().eq("account_id", tid);
@@ -5896,7 +5936,7 @@ ${finalBody}`,
         .json({ error: "U heeft geen toestemming voor deze klant." });
     await supabase
       .from("accounts")
-      .update({ status: "active" })
+      .update({ status: "active", failed_attempts: 0 })
       .eq("id", customerId);
     await supabase
       .from("access_logs")
@@ -6280,7 +6320,7 @@ ${finalBody}`,
   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: "spa",
     });
     app.use(vite.middlewares);
