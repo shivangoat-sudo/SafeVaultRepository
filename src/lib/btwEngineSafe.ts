@@ -41,7 +41,7 @@ export type SafeVatReport = Omit<LegacyVatReport, 'transactions' | 'audit'> & {
 };
 
 export type { SafeVatReport as VatReport };
-export { genereerStabielTransactieId, BOEKHOUDER_PERCENTAGE_OPTIES, berekenBetrouwbaarheidsscore } from './btwEngine';
+export { genereerStabielTransactieId, BOEKHOUDER_PERCENTAGE_OPTIES } from './btwEngine';
 
 const DOUBT = 'twijfel_onvoldoende_informatie' as ClassificationKey;
 const VALID_CLASSIFICATIONS = new Set<string>([
@@ -133,6 +133,15 @@ export function isTwijfelgeval(tx: SafeProcessedTransaction) {
   return tx.vat.status === 'unknown' || tx.herkend === false || tx.zekerheid === 'laag';
 }
 
+export function berekenBetrouwbaarheidsscore(report: SafeVatReport): number {
+  let score = 100;
+  if (!report.audit.ok) score -= Math.min(50, report.audit.problemen.length * 10);
+  const total = report.audit.input_count;
+  if (total > 0) score -= (report.audit.unresolved_count / total) * 20;
+  score -= Math.min(10, report.mogelijke_dubbele_transacties.length * 2);
+  return round2(Math.max(0, Math.min(100, score)));
+}
+
 export function calculateVatReport(rawTransactions: RawTransaction[], options: CalculateVatReportOptions = {}): SafeVatReport {
   validateInput(rawTransactions);
   const classifications = options.classifications ?? {};
@@ -168,8 +177,8 @@ export function calculateVatReport(rawTransactions: RawTransaction[], options: C
 
   // Independent transaction-level financial reconciliation. This does not trust legacy aggregates.
   const independentOutput = round2(knownRows.reduce((sum, tx) => {
-    if (tx.type === 'income' && tx.classification !== 'verlegd_21' && tx.aftrekbaar === false) return sum + (tx.btw_bedrag ?? 0);
     if (tx.classification === 'verlegd_21') return sum + (tx.btw_bedrag ?? 0);
+    if (tx.type === 'income' && tx.aftrekbaar === false) return sum + (tx.btw_bedrag ?? 0);
     return sum;
   }, 0));
   const independentInput = round2(knownRows.reduce((sum, tx) => {
