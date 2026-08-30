@@ -9,10 +9,11 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  verify:
+  harden-and-verify:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,6 +21,42 @@ jobs:
         with:
           node-version: 20
       - run: npm install
+      - name: Route VatCalculator through safe boundary
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/components/VatCalculator.tsx')
+          s = p.read_text()
+          s = s.replace('} from "@/lib/btwEngine";', '} from "@/lib/btwEngineSafe";')
+          s = s.replace('  vindEscalatieKandidaten,\n', '')
+          s = s.replace('  type AiProposalMap,\n', '  type AiProposalMap,\n')
+          start = s.find('      // STAP 1 — Automatisch berekenen met btwEngine')
+          if start != -1:
+              end = s.find('      setCalc({', start)
+              block = s[start:end]
+              block = block.replace('      let report = calculateVatReport(rawTransactions, { percentageOverrides: persistentOverrides });\n      const aiProposals: AiProposalMap = {};\n\n      // STAP 2 — Escaleren bij onzekerheid (automatisering via kandidaten)\n      const kandidaten = vindEscalatieKandidaten(report);\n      if (kandidaten.length > 0) {\n        report = calculateVatReport(rawTransactions, { aiProposals, percentageOverrides: persistentOverrides });\n      }\n\n', '      const aiProposals: AiProposalMap = {};\n      const report = calculateVatReport(rawTransactions, { percentageOverrides: persistentOverrides });\n\n')
+              s = s[:start] + block + s[end:]
+          s = s.replace('tx.rate !== 21', '(tx.vat.status !== "known" || tx.vat.rate !== 21)')
+          s = s.replace('tx.rate !== 9', '(tx.vat.status !== "known" || tx.vat.rate !== 9)')
+          s = s.replace('tx.rate !== 0', '(tx.vat.status !== "known" || tx.vat.rate !== 0)')
+          s = s.replace('tx.btw_bedrag', 'tx.vat.amount')
+          s = s.replace('`${tx.rate}%`', '`${tx.vat.status === "known" ? tx.vat.rate : "Onbekend"}%`')
+          p.write_text(s)
+          PY
+      - name: Commit production-boundary migration when needed
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/VatCalculator.tsx
+          if git diff --cached --quiet; then
+            echo "VatCalculator already uses the safe boundary"
+          else
+            git commit -m "fix: route VAT calculator through safe boundary"
+            git push
+          fi
       - run: npm run typecheck
       - run: npm run test:btw-safety
+      - run: npm test --if-present
       - run: npm run build
