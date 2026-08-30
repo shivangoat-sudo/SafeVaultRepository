@@ -74,10 +74,16 @@ function validateInput(rows: RawTransaction[]) {
 }
 
 function validateOverrides(rows: RawTransaction[], classifications: ClassificationMap, overrides: Record<string, BoekhouderBeoordeling>) {
-  const ids = new Set(rows.map(x => x.id));
+  const ids = new Map(rows.map(x => [x.id, x.type]));
   for (const [id, value] of Object.entries(classifications)) {
-    if (!ids.has(id)) throw new Error(`BTW safety: classificatie-override voor onbekende transactie ${id}.`);
+    const type = ids.get(id);
+    if (!type) throw new Error(`BTW safety: classificatie-override voor onbekende transactie ${id}.`);
     if (!VALID_CLASSIFICATIONS.has(value)) throw new Error(`BTW safety: ongeldige classificatie-override voor ${id}.`);
+    const incomeClassification = value.startsWith('omzet_');
+    const expenseClassification = value.startsWith('kosten_') || value === 'horeca_bua_9' || value === 'verlegd_21' || value === 'prive_geen_btw';
+    if ((type === 'income' && !incomeClassification) || (type === 'expense' && !expenseClassification)) {
+      throw new Error(`BTW safety: classificatie-override ${value} past niet bij ${type}-transactie ${id}.`);
+    }
   }
   for (const [id, value] of Object.entries(overrides)) {
     if (!ids.has(id)) throw new Error(`BTW safety: percentage-override voor onbekende transactie ${id}.`);
@@ -160,8 +166,21 @@ export function calculateVatReport(rawTransactions: RawTransaction[], options: C
   const ignoredCount = ignored.length;
   if (trustedCount + unresolvedCount + ignoredCount !== inputCount) problems.push(`Regelaantal-controle faalt: zeker (${trustedCount}) + twijfel (${unresolvedCount}) + genegeerd (${ignoredCount}) != input (${inputCount}).`);
 
+  // Independent transaction-level financial reconciliation. This does not trust legacy aggregates.
+  const independentOutput = round2(knownRows.reduce((sum, tx) => {
+    if (tx.type === 'income' && tx.classification !== 'verlegd_21' && tx.aftrekbaar === false) return sum + (tx.btw_bedrag ?? 0);
+    if (tx.classification === 'verlegd_21') return sum + (tx.btw_bedrag ?? 0);
+    return sum;
+  }, 0));
+  const independentInput = round2(knownRows.reduce((sum, tx) => {
+    if (tx.type === 'expense' && tx.aftrekbaar) return sum + (tx.btw_bedrag ?? 0);
+    return sum;
+  }, 0));
   const outputVat = round2(legacy.overzicht.verschuldigd.totaal);
   const inputVat = round2(legacy.overzicht.aftrekbaar.totaal);
+  if (independentOutput !== outputVat) problems.push(`Onafhankelijke output-BTW-controle faalt: transacties (${independentOutput}) != rapport (${outputVat}).`);
+  if (independentInput !== inputVat) problems.push(`Onafhankelijke input-BTW-controle faalt: transacties (${independentInput}) != rapport (${inputVat}).`);
+
   const expectedNet = round2(outputVat - inputVat);
   const identityDifference = round2(expectedNet - legacy.overzicht.netto_btw);
   if (identityDifference !== 0) problems.push(`Eindidentiteit faalt: verschuldigd (${outputVat}) - aftrekbaar (${inputVat}) != netto (${legacy.overzicht.netto_btw}).`);
