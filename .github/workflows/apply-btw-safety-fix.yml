@@ -1,4 +1,4 @@
-name: Apply BTW structural safety fix
+name: BTW safety CI
 
 on:
   push:
@@ -6,23 +6,17 @@ on:
       - fix/btw-structural-safety
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply:
-    if: github.event.head_commit.message != 'Apply BTW structural safety fix'
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: '3.12'
-      - name: Apply source transformation
-        run: python scripts/repair_btw_engine.py
-      - name: Commit repaired engine
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/lib/btwEngine.ts
-          git diff --cached --quiet || git commit -m 'Apply BTW structural safety fix'
-          git push
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
