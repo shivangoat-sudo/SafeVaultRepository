@@ -59,12 +59,31 @@ assert.throws(() => calculateVatReport(
   { percentageOverrides: { 'bad-override': { percentage: 99 as 0 | 9 | 21 } } }
 ));
 
+assert.throws(() => calculateVatReport(
+  [{ id: 'bad-direction', type: 'income', amount_incl: 121, description: 'Verkoop boek' }],
+  { classifications: { 'bad-direction': 'kosten_algemeen_21' } }
+));
+
 assert.throws(() => calculateVatReport([
   { id: 'duplicate', type: 'income', amount_incl: 100, description: 'A' },
   { id: 'duplicate', type: 'income', amount_incl: 100, description: 'B' },
 ]));
 
-for (const report of [unknownIncome, unknownExpense, knownZero, knownIncome, foreignService, manuallyResolved]) {
+const largeDataset = Array.from({ length: 10_000 }, (_, i) => ({
+  id: `scale-${i}`,
+  type: 'income' as const,
+  amount_incl: 109,
+  description: 'Verkoop boek',
+}));
+const largeReport = calculateVatReport(largeDataset);
+assert.equal(largeReport.audit.input_count, 10_000);
+assert.equal(largeReport.audit.trusted_count, 10_000);
+assert.equal(largeReport.audit.unresolved_count, 0);
+assert.equal(largeReport.audit.ignored_count, 0);
+assert.equal(largeReport.audit.ok, true);
+assert.equal(largeReport.overzicht.verschuldigd.totaal, 90_000);
+
+for (const report of [unknownIncome, unknownExpense, knownZero, knownIncome, foreignService, manuallyResolved, largeReport]) {
   assert.equal(
     report.overzicht.verschuldigd.totaal - report.overzicht.aftrekbaar.totaal,
     report.overzicht.netto_btw,
