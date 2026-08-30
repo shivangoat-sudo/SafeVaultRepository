@@ -101,7 +101,8 @@ export type ClassificationSource =
   | 'standaard_geen_uitzondering'   // geen enkele reden gevonden om af te wijken van het standaardtarief -> standaardtarief geldt met vertrouwen (GEEN twijfelgeval)
   | 'conflict_gedetecteerd'         // tegenstrijdige signalen (bv. Nederlandse rechtsvorm + buitenlands rekeningnummer + claim van verlegde BTW) -> échte twijfel
   | 'handmatig'                     // expliciete volledige override door de gebruiker (classifications-map)
-  | 'handmatig_percentage';         // boekhouder heeft, als laatste redmiddel, alleen het BTW-percentage aangewezen (percentageOverrides)
+  | 'handmatig_percentage'         // boekhouder heeft, als laatste redmiddel, alleen het BTW-percentage aangewezen (percentageOverrides)
+  | 'twijfel_onvoldoende_informatie'; // onvoldoende informatie: NOOIT automatisch als fiscale uitkomst meenemen
 
 export type Zekerheid = 'hoog' | 'gemiddeld' | 'laag';
 
@@ -966,19 +967,18 @@ export function autoClassify(
       const result = layer(ctx);
       if (result) return result;
     }
-    // Alle lagen doorlopen, geen enkel signaal (positief of tegenstrijdig)
-    // gevonden: er is geen reden om af te wijken van het algemene tarief,
-    // dus geldt dat tarief — met vertrouwen, niet als gok. Dit is GEEN
-    // twijfelgeval: "geen uitzondering van toepassing" is zelf al het
-    // juiste, volledig onderbouwde antwoord (art. 15 lid 1 sub a Wet OB
-    // 1968 is de standaardregel, geen noodgreep).
+    // Alle lagen doorlopen zonder voldoende fiscale aanwijzing: dit is an
+    // unresolved case. Do NOT invent a 21% classification. The placeholder
+    // classification is retained only because ProcessedTransaction currently
+    // requires a ClassificationKey; calculateVatReport excludes herkend=false
+    // rows from all financial totals until a bookkeeper resolves them.
     return {
       classification: 'kosten_algemeen_21',
-      herkend: true,
+      herkend: false,
       herkenningsbron:
-        'Geen leverancier, trefwoord, categorie of IBAN-signaal wijst op een verlaagd tarief, vrijstelling of verlegging — het algemene tarief van 21% is dan het fiscaal juiste standaardantwoord.',
-      bron: 'standaard_geen_uitzondering',
-      zekerheid: 'hoog',
+        'Onvoldoende fiscale informatie om deze uitgave betrouwbaar te classificeren. De engine gokt niet op 21%; deze transactie moet handmatig worden beoordeeld.',
+      bron: 'twijfel_onvoldoende_informatie',
+      zekerheid: 'laag',
     };
   }
 
@@ -1001,15 +1001,15 @@ export function autoClassify(
     const expliciet = layer2b_explicietPercentage(ctx);
     if (expliciet) return expliciet;
   }
-  // Zelfde redenering als bij uitgaven: geen signaal voor iets anders dan
-  // het algemene tarief gevonden -> dat tarief geldt met vertrouwen.
+  // Geen voldoende fiscale aanwijzing: markeer als twijfelgeval.
+  // Een 21%-placeholder wordt nooit financieel meegerekend zolang herkend=false.
   return {
     classification: 'omzet_algemeen_21',
-    herkend: true,
+    herkend: false,
     herkenningsbron:
-      'Geen trefwoord of categorie wijst op een verlaagd tarief of vrijstelling — het algemene tarief van 21% is dan het fiscaal juiste standaardantwoord voor binnenlandse B2B-dienstverlening.',
-    bron: 'standaard_geen_uitzondering',
-    zekerheid: 'hoog',
+      'Onvoldoende fiscale informatie om deze ontvangst betrouwbaar te classificeren. De engine gokt niet op 21%; deze transactie moet handmatig worden beoordeeld.',
+    bron: 'twijfel_onvoldoende_informatie',
+    zekerheid: 'laag',
   };
 }
 
@@ -1470,6 +1470,9 @@ export function calculateVatReport(
       automatisch_herkend += 1;
     } else {
       controle_aanbevolen.push(p);
+      // CRITICAL SAFETY RULE: an unresolved classification is not a fiscal
+      // conclusion. Its calculated placeholder must never enter totals.
+      continue;
     }
 
     if (p.classification === 'verlegd_21') {
@@ -1617,6 +1620,13 @@ function auditReport(
     }
   }
 
+  // Regelaantal-controle: no silent disappearance or duplication.
+  const meegenomen = processed.filter((t) => t.herkend).length;
+  const twijfel = processed.filter((t) => !t.herkend).length;
+  if (meegenomen + twijfel !== processed.length) {
+    problemen.push(`Regelaantal-controle faalt: meegenomen (${meegenomen}) + twijfelgevallen (${twijfel}) != verwerkte transacties (${processed.length}).`);
+  }
+
   // Controle 1 (aggregaat): Totaal incl. 21% − Totaal excl. 21% − Totale BTW 21% = 0.
   if (!approxEqual(totals.totaal_incl_21 - totals.totaal_excl_21 - totals.totale_btw_21, 0)) {
     problemen.push(
@@ -1636,11 +1646,11 @@ function auditReport(
   // "verschil" dat puur door de afrondingsmethode zelf komt.
   const herberekend_btw_21 = round2(
     processed
-      .filter((t) => t.rate === 21 && t.classification !== 'verlegd_21')
+      .filter((t) => t.herkend && t.rate === 21 && t.classification !== 'verlegd_21')
       .reduce((sum, t) => sum + t._btw_bedrag_precisie, 0)
   );
   const herberekend_btw_9 = round2(
-    processed.filter((t) => t.rate === 9).reduce((sum, t) => sum + t._btw_bedrag_precisie, 0)
+    processed.filter((t) => t.herkend && t.rate === 9).reduce((sum, t) => sum + t._btw_bedrag_precisie, 0)
   );
 
   if (!approxEqual(herberekend_btw_21, totals.totale_btw_21)) {
