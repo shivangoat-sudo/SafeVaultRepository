@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - fix/btw-structural-safety
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -19,4 +22,5 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      - run: npm run test:btw-safety
       - run: npm run build
