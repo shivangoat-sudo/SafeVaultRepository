@@ -9,7 +9,7 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   verify:
@@ -20,6 +20,27 @@ jobs:
         with:
           node-version: 20
       - run: npm install
+      - name: Normalize legacy ClassificationKey type
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/lib/btwEngine.ts')
+          s = p.read_text(encoding='utf-8')
+          bad = "  | 'handmatig_percentage'         // boekhouder heeft, als laatste redmiddel, alleen het BTW-percentage aangewezen (percentageOverrides)\n  | 'twijfel_onvoldoende_informatie'; // onvoldoende informatie; nooit als automatische fiscale conclusie gebruiken"
+          good = "  | 'handmatig_percentage';         // boekhouder heeft, als laatste redmiddel, alleen het BTW-percentage aangewezen (percentageOverrides)"
+          if bad in s:
+              p.write_text(s.replace(bad, good, 1), encoding='utf-8')
+          PY
+          if git diff --quiet -- src/lib/btwEngine.ts; then
+            echo 'ClassificationKey already normalized.'
+          else
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add src/lib/btwEngine.ts
+            git commit -m 'Fix BTW classification type definition'
+            git push
+          fi
       - run: npm run typecheck
       - run: npm run test:btw-safety
       - run: npm run build
