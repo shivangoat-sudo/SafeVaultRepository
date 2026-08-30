@@ -101,7 +101,8 @@ export type ClassificationSource =
   | 'standaard_geen_uitzondering'   // geen enkele reden gevonden om af te wijken van het standaardtarief -> standaardtarief geldt met vertrouwen (GEEN twijfelgeval)
   | 'conflict_gedetecteerd'         // tegenstrijdige signalen (bv. Nederlandse rechtsvorm + buitenlands rekeningnummer + claim van verlegde BTW) -> échte twijfel
   | 'handmatig'                     // expliciete volledige override door de gebruiker (classifications-map)
-  | 'handmatig_percentage';         // boekhouder heeft, als laatste redmiddel, alleen het BTW-percentage aangewezen (percentageOverrides)
+  | 'handmatig_percentage'          // boekhouder heeft, als laatste redmiddel, alleen het BTW-percentage aangewezen (percentageOverrides)
+  | 'twijfel_onvoldoende_informatie'; // onvoldoende informatie; nooit financieel geaccepteerd zonder expliciete beoordeling
 
 export type Zekerheid = 'hoog' | 'gemiddeld' | 'laag';
 
