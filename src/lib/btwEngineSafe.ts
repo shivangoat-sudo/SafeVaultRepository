@@ -13,6 +13,7 @@ import {
   type ClassificationSource,
   type Zekerheid,
   type BtwPercentage,
+  type TransactionTableRow,
 } from './btwEngine';
 
 export type {
@@ -26,24 +27,11 @@ export type {
 };
 
 export {
-  tweeKolommenWeergave,
   genereerStabielTransactieId,
   BOEKHOUDER_PERCENTAGE_OPTIES,
   berekenBetrouwbaarheidsscore,
 } from './btwEngine';
 
-/**
- * Safety facade around the existing deterministic engine.
- *
- * The legacy engine historically treated an absent match as a confident 21%
- * result. This facade deliberately does NOT do that. A fiscal conclusion is
- * included in the financial totals only when there is a concrete rule match
- * or an explicit accountant override.
- *
- * AI proposals are evidence only here. A language model can suggest a
- * classification; it cannot prove the underlying tax facts from a bank
- * description alone.
- */
 const STRONG_SOURCES = new Set<ClassificationSource>([
   'automatisch_regelgebaseerd',
   'automatisch_omschrijving',
@@ -181,4 +169,29 @@ export function vindEscalatieKandidaten(report: VatReport) {
       'Controleer bij buitenlandse prestaties de vestigingsplaats, B2B/B2C-status en de toepasselijke verleggingsregeling voordat de transactie definitief wordt geclassificeerd.',
     ],
   }));
+}
+
+function formatEuro(n: number): string {
+  return new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(n);
+}
+
+/** UI-safe transaction split: unresolved rows never masquerade as 0% VAT. */
+export function tweeKolommenWeergave(report: VatReport): {
+  zeker: TransactionTableRow[];
+  twijfelgevallen: TransactionTableRow[];
+} {
+  const zeker: TransactionTableRow[] = [];
+  const twijfelgevallen: TransactionTableRow[] = [];
+  for (const t of report.transactions) {
+    const row: TransactionTableRow = {
+      transactie_id: t.id,
+      omschrijving: t.description ?? '(geen omschrijving)',
+      bedrag: formatEuro(t.amount_incl_input),
+      type: t.type === 'income' ? 'Inkomsten' : 'Uitgaven',
+      btw: isTwijfelgeval(t) ? 'Onbekend' : `${t.rate}%`,
+      toegepaste_regel: t.applied_rule.korte_toelichting,
+    };
+    (isTwijfelgeval(t) ? twijfelgevallen : zeker).push(row);
+  }
+  return { zeker, twijfelgevallen };
 }
