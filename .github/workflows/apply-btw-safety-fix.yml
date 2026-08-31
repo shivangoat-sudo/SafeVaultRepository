@@ -5,34 +5,27 @@ on:
   pull_request:
     branches: [main]
 permissions:
-  contents: write
+  contents: read
 jobs:
   harden-and-verify:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with:
+          node-version: 22
       - run: npm install
       - name: Verify safe production boundary
         run: |
-          ! grep -R --exclude-dir=node_modules --exclude-dir=.git -n 'from "@/lib/btwEngine"' src/components src/pages src/hooks src/services 2>/dev/null || (echo 'Direct legacy VAT engine import found in production code' && exit 1)
+          if grep -R --exclude-dir=node_modules --exclude-dir=.git -nE 'from ["'"'](@/lib/)?btwEngine(["'"']|\.)|require\(["'"'].*btwEngine' src/components src/pages src/hooks src/services src/lib 2>/dev/null; then
+            echo 'Direct legacy VAT engine import found in production code'
+            exit 1
+          fi
       - name: Typecheck
-        id: typecheck
-        continue-on-error: true
-        run: npm run typecheck 2>&1 | tee typecheck-errors.txt
-      - name: Publish typecheck diagnostics
-        if: steps.typecheck.outcome == 'failure'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add typecheck-errors.txt
-          git commit -m "ci: capture typecheck diagnostics" || true
-          git push || true
+        run: npm run typecheck
       - name: Safety tests
         run: npm run test:btw-safety
       - name: Existing tests
-        run: npm test --if-present
+        run: npm test
       - name: Build
         run: npm run build
