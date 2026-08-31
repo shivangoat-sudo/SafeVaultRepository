@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { calculateFiscalVatReport } from '../src/lib/btwFiscalSafe';
+import { calculateFiscalVatReport } from '../src/lib/btwFiscalSafeNormalized';
 
 const rows = [
   { id:'sale21', type:'income' as const, amount_incl:121, description:'Verkoop software 21%' },
