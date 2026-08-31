@@ -41,6 +41,9 @@ const foreignService = calculateVatReport([{ id: 'foreign-service', type: 'expen
 assert.equal(foreignService.overzicht.verschuldigd.verlegde_btw, 25.41);
 assert.equal(foreignService.overzicht.aftrekbaar.verlegde_btw, 25.41);
 assert.equal(foreignService.overzicht.netto_btw, 0);
+assert.equal(foreignService.audit.ok, true);
+assert.equal(foreignService.audit.financial_output_vat, 25.41);
+assert.equal(foreignService.audit.financial_input_vat, 25.41);
 
 const manuallyResolved = calculateVatReport(
   [{ id: 'manual-expense', type: 'expense', amount_incl: 121, description: 'Onbekende leverancier' }],
