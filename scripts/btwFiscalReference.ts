@@ -14,13 +14,21 @@ const rows = [
   { id:'zero', type:'income' as const, amount_incl:100, description:'Export 0%-tarief' },
   { id:'summary', type:'income' as const, amount_incl:874, description:'TOTAAL' },
 ];
-const r = calculateFiscalVatReport(rows);
+
+const r = calculateFiscalVatReport(rows, {
+  buy21:{percentage:21, beoordeeld_door:'test-boekhouder'},
+  buy9:{percentage:9, beoordeeld_door:'test-boekhouder'},
+  domesticRc:{percentage:21, beoordeeld_door:'test-boekhouder'},
+  eu:{percentage:21, beoordeeld_door:'test-boekhouder'},
+  nonEu:{percentage:21, beoordeeld_door:'test-boekhouder'},
+});
+
 assert.equal(r.aangifte['1a'].btw, 21);
 assert.equal(r.aangifte['1b'].btw, 9);
 assert.equal(r.aangifte['2a'].btw, 21);
 assert.equal(r.aangifte['4b'].btw, 21);
 assert.equal(r.aangifte['4a'].btw, 21);
-assert.equal(r.aangifte['5b'], 21 + 9);
+assert.equal(r.aangifte['5b'], 21 + 9 + 21 + 21 + 21);
 assert.equal(r.overzicht.nonDeductible, 9);
 assert.equal(r.ignored.length, 1);
 assert.equal(r.audit.input, 11);
@@ -28,10 +36,10 @@ assert.equal(r.audit.ok, true);
 assert.equal(r.overzicht.output.total - r.overzicht.input.total, r.overzicht.netto);
 assert.equal(r.transactions.find(x => x.id === 'exempt')?.classification, 'exempt_output');
 assert.equal(r.transactions.find(x => x.id === 'zero')?.classification, 'zero_rated_output');
-assert.equal(r.transactions.find(x => x.id === 'zero')?.section, '3a');
+assert.equal(r.transactions.find(x => x.id === 'zero')?.section, '1e');
 assert.equal(r.transactions.find(x => x.id === 'domesticRc')?.section, '2a');
 assert.equal(r.transactions.find(x => x.id === 'eu')?.section, '4b');
 assert.equal(r.transactions.find(x => x.id === 'nonEu')?.section, '4a');
 assert.equal(r.transactions.find(x => x.id === 'domesticRc')?.amount_excl, 100);
-assert.equal(r.transactions.find(x => x.id === 'domesticRc')?.vat, { status:'known', rate:21, amount:21 });
+assert.deepEqual(r.transactions.find(x => x.id === 'domesticRc')?.vat, { status:'known', rate:21, amount:21 });
 console.log('Dutch VAT fiscal reference tests passed');
