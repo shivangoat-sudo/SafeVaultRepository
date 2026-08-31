@@ -14,10 +14,6 @@ import { BOEKHOUDER_PERCENTAGE_OPTIES, genereerStabielTransactieId } from './btw
 export type { RawTransaction, ClassificationMap, AiProposalMap, CalculateVatReportOptions, BoekhouderBeoordeling, BtwPercentage };
 export { genereerStabielTransactieId, BOEKHOUDER_PERCENTAGE_OPTIES };
 
-/**
- * The only fiscal VAT representation exposed by the safety boundary.
- * Unknown is intentionally not representable as rate 0 or amount 0.
- */
 export type SafeVat =
   | { status: 'known'; rate: 0 | 9 | 21; amount: number }
   | { status: 'unknown'; rate: null; amount: null };
@@ -129,7 +125,6 @@ const SUMMARY_FIRST = new Set(['totaal', 'saldo', 'eindtotaal']);
 const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 const norm = (v: unknown) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 
-/** Money is represented in integer cents for all VAT calculations. */
 function toCents(amount: number): number {
   if (!finite(amount)) throw new Error('BTW safety: bedrag moet een eindig getal zijn.');
   const cents = Math.round(amount * 100);
@@ -155,21 +150,10 @@ function vatFromGrossCents(grossCents: number, rate: 0 | 9 | 21): number {
   return roundRatio(grossCents * rate, 100 + rate);
 }
 
-function isIncomeClassification(value: string): boolean {
-  return value.startsWith('omzet_');
-}
-
-function isExpenseClassification(value: string): boolean {
-  return value.startsWith('kosten_') || value === 'horeca_bua_9' || value === 'verlegd_21' || value === 'prive_geen_btw';
-}
-
-function isReverseCharge(value: string): boolean {
-  return value === 'verlegd_21';
-}
-
-function isNonDeductible(value: string): boolean {
-  return value === 'horeca_bua_9' || value === 'kosten_vrijgesteld_0' || value === 'prive_geen_btw';
-}
+function isIncomeClassification(value: string): boolean { return value.startsWith('omzet_'); }
+function isExpenseClassification(value: string): boolean { return value.startsWith('kosten_') || value === 'horeca_bua_9' || value === 'verlegd_21' || value === 'prive_geen_btw'; }
+function isReverseCharge(value: string): boolean { return value === 'verlegd_21'; }
+function isNonDeductible(value: string): boolean { return value === 'horeca_bua_9' || value === 'kosten_vrijgesteld_0' || value === 'prive_geen_btw'; }
 
 function validateInput(rows: unknown): asserts rows is RawTransaction[] {
   if (!Array.isArray(rows)) throw new Error('BTW safety: transacties moeten een array zijn.');
@@ -185,34 +169,20 @@ function validateInput(rows: unknown): asserts rows is RawTransaction[] {
   }
 }
 
-function validateOverrides(
-  rows: RawTransaction[],
-  classifications: ClassificationMap,
-  percentageOverrides: Record<string, BoekhouderBeoordeling>,
-): void {
+function validateOverrides(rows: RawTransaction[], classifications: ClassificationMap, percentageOverrides: Record<string, BoekhouderBeoordeling>): void {
   const ids = new Map(rows.map((x) => [x.id, x.type]));
-
   for (const [id, value] of Object.entries(classifications)) {
     const type = ids.get(id);
     if (!type) throw new Error(`BTW safety: classificatie-override voor onbekende transactie ${id}.`);
     if (!VALID_CLASSIFICATIONS.has(value)) throw new Error(`BTW safety: ongeldige classificatie-override voor ${id}.`);
     if (percentageOverrides[id]) throw new Error(`BTW safety: zowel classificatie- als percentage-override voor ${id}.`);
-    if ((type === 'income' && !isIncomeClassification(value)) || (type === 'expense' && !isExpenseClassification(value))) {
-      throw new Error(`BTW safety: classificatie-override ${value} past niet bij ${type}-transactie ${id}.`);
-    }
+    if ((type === 'income' && !isIncomeClassification(value)) || (type === 'expense' && !isExpenseClassification(value))) throw new Error(`BTW safety: classificatie-override ${value} past niet bij ${type}-transactie ${id}.`);
   }
-
   for (const [id, value] of Object.entries(percentageOverrides)) {
     if (!ids.has(id)) throw new Error(`BTW safety: percentage-override voor onbekende transactie ${id}.`);
-    if (!value || typeof value !== 'object' || !VALID_RATES.has((value as { percentage?: unknown }).percentage as number)) {
-      throw new Error(`BTW safety: ongeldig BTW-percentage voor ${id}.`);
-    }
-    if (typeof value.beoordeeld_door !== 'string' || value.beoordeeld_door.trim() === '') {
-      throw new Error(`BTW safety: percentage-override voor ${id} mist een geldige menselijke beoordelaar.`);
-    }
-    if (!Number.isFinite(value.percentage) || !Number.isInteger(value.percentage)) {
-      throw new Error(`BTW safety: BTW-percentage voor ${id} moet een eindig geheel getal zijn.`);
-    }
+    if (!value || typeof value !== 'object' || !VALID_RATES.has((value as { percentage?: unknown }).percentage as number)) throw new Error(`BTW safety: ongeldig BTW-percentage voor ${id}.`);
+    if (typeof value.beoordeeld_door !== 'string' || value.beoordeeld_door.trim() === '') throw new Error(`BTW safety: percentage-override voor ${id} mist een geldige menselijke beoordelaar.`);
+    if (!Number.isFinite(value.percentage) || !Number.isInteger(value.percentage)) throw new Error(`BTW safety: BTW-percentage voor ${id} moet een eindig geheel getal zijn.`);
   }
 }
 
@@ -229,9 +199,7 @@ function makeRule(classification: SafeClassificationKey, reason: string, summary
   return {
     classification,
     wetsartikel: summary ? 'Niet van toepassing: samenvattingsregel' : 'Fiscale grondslag vereist controle van de onderliggende factuur/brongegevens',
-    omschrijving: summary
-      ? 'Deze regel is structureel als samenvatting herkend en wordt niet als individuele transactie verwerkt.'
-      : 'De transactie is niet automatisch financieel geaccepteerd zonder voldoende classificatiebewijs.',
+    omschrijving: summary ? 'Deze regel is structureel als samenvatting herkend en wordt niet als individuele transactie verwerkt.' : 'De transactie is niet automatisch financieel geaccepteerd zonder voldoende classificatiebewijs.',
     korte_toelichting: reason,
     rubriek: summary ? 'Genegeerde samenvattingsregel' : 'Twijfelgeval — niet meegenomen in financiële BTW-totalen',
   };
@@ -239,88 +207,40 @@ function makeRule(classification: SafeClassificationKey, reason: string, summary
 
 function unresolved(tx: RawTransaction, reason: string): SafeProcessedTransaction {
   return {
-    id: tx.id,
-    date: tx.date,
-    type: tx.type,
-    description: tx.description,
-    classification: DOUBT,
-    amount_incl_input: tx.amount_incl,
-    bedrag_excl: null,
-    bedrag_incl: tx.amount_incl,
-    aftrekbaar: false,
-    applied_rule: makeRule(DOUBT, reason),
-    herkend: false,
-    herkenningsbron: reason,
-    classificatie_bron: 'twijfel_onvoldoende_informatie',
-    zekerheid: 'laag',
+    id: tx.id, date: tx.date, type: tx.type, description: tx.description, classification: DOUBT,
+    amount_incl_input: tx.amount_incl, bedrag_excl: null, bedrag_incl: tx.amount_incl, aftrekbaar: false,
+    applied_rule: makeRule(DOUBT, reason), herkend: false, herkenningsbron: reason,
+    classificatie_bron: 'twijfel_onvoldoende_informatie', zekerheid: 'laag',
     vat: { status: 'unknown', rate: null, amount: null },
   };
 }
 
-function calculateKnown(
-  tx: RawTransaction,
-  classification: ClassificationKey,
-  source: string,
-  certainty: 'hoog' | 'gemiddeld' | 'laag',
-): SafeProcessedTransaction {
+function calculateKnown(tx: RawTransaction, classification: ClassificationKey, source: string, certainty: 'hoog' | 'gemiddeld' | 'laag'): SafeProcessedTransaction {
   const grossCents = toCents(tx.amount_incl);
   let rate: 0 | 9 | 21;
   switch (classification) {
-    case 'omzet_verlaagd_9':
-    case 'kosten_verlaagd_9':
-    case 'horeca_bua_9': rate = 9; break;
-    case 'omzet_algemeen_21':
-    case 'kosten_algemeen_21':
-    case 'verlegd_21': rate = 21; break;
-    case 'omzet_vrijgesteld_0':
-    case 'kosten_vrijgesteld_0':
-    case 'prive_geen_btw': rate = 0; break;
+    case 'omzet_verlaagd_9': case 'kosten_verlaagd_9': case 'horeca_bua_9': rate = 9; break;
+    case 'omzet_algemeen_21': case 'kosten_algemeen_21': case 'verlegd_21': rate = 21; break;
+    case 'omzet_vrijgesteld_0': case 'kosten_vrijgesteld_0': case 'prive_geen_btw': rate = 0; break;
     default: throw new Error(`BTW safety: onbekende classificatie ${classification}.`);
   }
-
   const vatCents = vatFromGrossCents(grossCents, rate);
   const netCents = grossCents - vatCents;
   const deduct = tx.type === 'expense' && !isNonDeductible(classification);
-
   return {
-    id: tx.id,
-    date: tx.date,
-    type: tx.type,
-    description: tx.description,
-    classification,
-    amount_incl_input: tx.amount_incl,
-    bedrag_excl: fromCents(netCents),
-    bedrag_incl: tx.amount_incl,
-    aftrekbaar: deduct,
-    applied_rule: makeRule(classification, source),
-    herkend: true,
-    herkenningsbron: source,
-    classificatie_bron: source,
-    zekerheid: certainty,
+    id: tx.id, date: tx.date, type: tx.type, description: tx.description, classification,
+    amount_incl_input: tx.amount_incl, bedrag_excl: fromCents(netCents), bedrag_incl: tx.amount_incl,
+    aftrekbaar: deduct, applied_rule: makeRule(classification, source), herkend: true,
+    herkenningsbron: source, classificatie_bron: source, zekerheid: certainty,
     vat: { status: 'known', rate, amount: fromCents(vatCents) },
   };
 }
 
-/**
- * Explicit policy for what may cross the financial boundary automatically.
- * Combined deterministic signals are accepted; AI statuses are accepted only
- * when supplied by a real external classifier. This safe boundary itself does
- * not invent AI proposals.
- */
 function isTrustedSource(source: string): boolean {
-  return source === 'automatisch_regelgebaseerd'
-    || source === 'automatisch_omschrijving'
-    || source === 'automatisch_gecombineerd'
-    || source === 'ai_consensus_unaniem'
-    || source === 'ai_consensus_meerderheid'
-    || source === 'handmatig'
-    || source === 'handmatig_percentage';
+  return source === 'automatisch_regelgebaseerd' || source === 'automatisch_omschrijving' || source === 'automatisch_gecombineerd' || source === 'ai_consensus_unaniem' || source === 'ai_consensus_meerderheid' || source === 'handmatig' || source === 'handmatig_percentage';
 }
 
-/** The single official unresolved definition for the safe model. */
-export function isTwijfelgeval(tx: SafeProcessedTransaction): boolean {
-  return tx.vat.status === 'unknown';
-}
+export function isTwijfelgeval(tx: SafeProcessedTransaction): boolean { return tx.vat.status === 'unknown'; }
 
 function findDuplicateGroups(rows: RawTransaction[]): string[][] {
   const groups = new Map<string, string[]>();
@@ -334,14 +254,7 @@ function findDuplicateGroups(rows: RawTransaction[]): string[][] {
 }
 
 function buildOverview(rows: SafeProcessedTransaction[]): SafeVatOverview {
-  let output21 = 0;
-  let output9 = 0;
-  let reverseOutput = 0;
-  let input21 = 0;
-  let input9 = 0;
-  let reverseInput = 0;
-  let nonDeductible = 0;
-
+  let output21 = 0, output9 = 0, reverseOutput = 0, input21 = 0, input9 = 0, reverseInput = 0, nonDeductible = 0;
   for (const tx of rows) {
     if (tx.vat.status !== 'known') continue;
     const vat = tx.vat.amount;
@@ -358,25 +271,15 @@ function buildOverview(rows: SafeProcessedTransaction[]): SafeVatOverview {
       } else if (isNonDeductible(tx.classification)) nonDeductible += vat;
     }
   }
-
-  output21 = fromCents(toCents(output21));
-  output9 = fromCents(toCents(output9));
-  reverseOutput = fromCents(toCents(reverseOutput));
-  input21 = fromCents(toCents(input21));
-  input9 = fromCents(toCents(input9));
-  reverseInput = fromCents(toCents(reverseInput));
-  nonDeductible = fromCents(toCents(nonDeductible));
-
+  output21 = fromCents(toCents(output21)); output9 = fromCents(toCents(output9)); reverseOutput = fromCents(toCents(reverseOutput));
+  input21 = fromCents(toCents(input21)); input9 = fromCents(toCents(input9)); reverseInput = fromCents(toCents(reverseInput)); nonDeductible = fromCents(toCents(nonDeductible));
   const outputTotal = fromCents(toCents(output21 + output9 + reverseOutput));
   const inputTotal = fromCents(toCents(input21 + input9 + reverseInput));
   const net = fromCents(toCents(outputTotal - inputTotal));
-
   return {
     verschuldigd: { inkomsten_21: output21, inkomsten_9: output9, verlegde_btw: reverseOutput, totaal: outputTotal },
     aftrekbaar: { uitgaven_21: input21, uitgaven_9: input9, verlegde_btw: reverseInput, totaal: inputTotal },
-    niet_aftrekbaar_ter_info: nonDeductible,
-    netto_btw: net,
-    status: net >= 0 ? 'af_te_dragen' : 'terug_te_vorderen',
+    niet_aftrekbaar_ter_info: nonDeductible, netto_btw: net, status: net >= 0 ? 'af_te_dragen' : 'terug_te_vorderen',
     toelichting: `${outputTotal.toFixed(2)} verschuldigde BTW − ${inputTotal.toFixed(2)} aftrekbare voorbelasting = ${net.toFixed(2)} netto BTW`,
   };
 }
@@ -387,7 +290,12 @@ function independentAudit(rows: SafeProcessedTransaction[], overview: SafeVatOve
   for (const tx of rows) {
     if (tx.vat.status !== 'known') continue;
     const vatCents = toCents(tx.vat.amount);
-    if (tx.type === 'income' && (tx.classification.startsWith('omzet_') || isReverseCharge(tx.classification))) outputCents += vatCents;
+    // Output VAT includes domestic taxable income and reverse-charge purchases,
+    // because reverse-charge purchases create a simultaneous output obligation.
+    if ((tx.type === 'income' && (tx.classification.startsWith('omzet_') || isReverseCharge(tx.classification)))
+      || (tx.type === 'expense' && isReverseCharge(tx.classification))) {
+      outputCents += vatCents;
+    }
     if (tx.type === 'expense' && tx.aftrekbaar) inputCents += vatCents;
   }
   const output = fromCents(outputCents);
@@ -406,101 +314,46 @@ export function calculateVatReport(rawTransactions: RawTransaction[], options: C
   const classifications = options.classifications ?? {};
   const percentageOverrides = options.percentageOverrides ?? {};
   validateOverrides(rawTransactions, classifications, percentageOverrides);
-
-  // AI is not connected to this production boundary. Never simulate it.
-  if (options.aiProposals && Object.keys(options.aiProposals).length > 0) {
-    throw new Error('BTW safety: AI-classificatie is niet aangesloten; gebruik een expliciete menselijke beoordeling.');
-  }
-
-  // Structural filtering occurs before classification or fiscal calculation.
+  if (options.aiProposals && Object.keys(options.aiProposals).length > 0) throw new Error('BTW safety: AI-classificatie is niet aangesloten; gebruik een expliciete menselijke beoordeling.');
   const candidates: RawTransaction[] = [];
   const ignored: Array<{ id: string; reden: string }> = [];
   for (const tx of rawTransactions) {
     const reason = summaryCheck(tx);
-    if (reason) ignored.push({ id: tx.id, reden: reason });
-    else candidates.push(tx);
+    if (reason) ignored.push({ id: tx.id, reden: reason }); else candidates.push(tx);
   }
-
   const unresolvedRows: SafeProcessedTransaction[] = [];
   const trustedRows: SafeProcessedTransaction[] = [];
-
   for (const tx of candidates) {
-    if (classifications[tx.id]) {
-      trustedRows.push(calculateKnown(tx, classifications[tx.id], 'handmatig', 'hoog'));
-      continue;
-    }
-
+    if (classifications[tx.id]) { trustedRows.push(calculateKnown(tx, classifications[tx.id], 'handmatig', 'hoog')); continue; }
     if (percentageOverrides[tx.id]) {
       const percentage = percentageOverrides[tx.id].percentage;
-      const classification: ClassificationKey = tx.type === 'income'
-        ? (percentage === 21 ? 'omzet_algemeen_21' : percentage === 9 ? 'omzet_verlaagd_9' : 'omzet_vrijgesteld_0')
-        : (percentage === 21 ? 'kosten_algemeen_21' : percentage === 9 ? 'kosten_verlaagd_9' : 'kosten_vrijgesteld_0');
-      trustedRows.push(calculateKnown(tx, classification, 'handmatig_percentage', 'hoog'));
-      continue;
+      const classification: ClassificationKey = tx.type === 'income' ? (percentage === 21 ? 'omzet_algemeen_21' : percentage === 9 ? 'omzet_verlaagd_9' : 'omzet_vrijgesteld_0') : (percentage === 21 ? 'kosten_algemeen_21' : percentage === 9 ? 'kosten_verlaagd_9' : 'kosten_vrijgesteld_0');
+      trustedRows.push(calculateKnown(tx, classification, 'handmatig_percentage', 'hoog')); continue;
     }
-
     const auto = autoClassify(tx.description, tx.type, tx.memo, tx.tegenrekening_iban);
-    if (auto.herkend && isTrustedSource(auto.bron) && VALID_CLASSIFICATIONS.has(auto.classification)) {
-      trustedRows.push(calculateKnown(tx, auto.classification as ClassificationKey, auto.bron, auto.zekerheid === 'hoog' ? 'hoog' : 'gemiddeld'));
-    } else {
-      unresolvedRows.push(unresolved(tx, auto.herkenningsbron || 'Onvoldoende informatie voor automatische fiscale classificatie.'));
-    }
+    if (auto.herkend && isTrustedSource(auto.bron) && VALID_CLASSIFICATIONS.has(auto.classification)) trustedRows.push(calculateKnown(tx, auto.classification as ClassificationKey, auto.bron, auto.zekerheid === 'hoog' ? 'hoog' : 'gemiddeld'));
+    else unresolvedRows.push(unresolved(tx, auto.herkenningsbron || 'Onvoldoende informatie voor automatische fiscale classificatie.'));
   }
-
   const transactions = [...trustedRows, ...unresolvedRows];
   const overview = buildOverview(trustedRows);
   const reconciliation = independentAudit(trustedRows, overview);
   const problems = [...reconciliation.problems];
-  const inputCount = rawTransactions.length;
-  const trustedCount = trustedRows.length;
-  const unresolvedCount = unresolvedRows.length;
-  const ignoredCount = ignored.length;
-  if (trustedCount + unresolvedCount + ignoredCount !== inputCount) {
-    problems.push(`Regelaantal-controle faalt: zeker (${trustedCount}) + twijfel (${unresolvedCount}) + genegeerd (${ignoredCount}) != input (${inputCount}).`);
-  }
-
+  const inputCount = rawTransactions.length, trustedCount = trustedRows.length, unresolvedCount = unresolvedRows.length, ignoredCount = ignored.length;
+  if (trustedCount + unresolvedCount + ignoredCount !== inputCount) problems.push(`Regelaantal-controle faalt: zeker (${trustedCount}) + twijfel (${unresolvedCount}) + genegeerd (${ignoredCount}) != input (${inputCount}).`);
   const duplicates = findDuplicateGroups(rawTransactions);
   if (duplicates.length > 0) problems.push(`Mogelijke dubbele transacties gevonden: ${duplicates.length} groep(en).`);
-
   const output21 = fromCents(trustedRows.filter((tx) => tx.classification === 'omzet_algemeen_21' && tx.vat.status === 'known').reduce((s, tx) => s + toCents(tx.vat.status === 'known' ? tx.vat.amount : 0), 0));
   const output9 = fromCents(trustedRows.filter((tx) => tx.classification === 'omzet_verlaagd_9' && tx.vat.status === 'known').reduce((s, tx) => s + toCents(tx.vat.status === 'known' ? tx.vat.amount : 0), 0));
   const reverse = fromCents(trustedRows.filter((tx) => isReverseCharge(tx.classification) && tx.type === 'expense' && tx.vat.status === 'known').reduce((s, tx) => s + toCents(tx.vat.status === 'known' ? tx.vat.amount : 0), 0));
   const input21 = fromCents(trustedRows.filter((tx) => tx.classification === 'kosten_algemeen_21' && tx.aftrekbaar && tx.vat.status === 'known').reduce((s, tx) => s + toCents(tx.vat.status === 'known' ? tx.vat.amount : 0), 0));
   const input9 = fromCents(trustedRows.filter((tx) => tx.classification === 'kosten_verlaagd_9' && tx.aftrekbaar && tx.vat.status === 'known').reduce((s, tx) => s + toCents(tx.vat.status === 'known' ? tx.vat.amount : 0), 0));
-
   return {
-    transactions,
-    overzicht: overview,
-    breakdown: {
-      verschuldigde_btw_omzet_21: output21,
-      verschuldigde_btw_omzet_9: output9,
-      verlegde_btw_rubriek_2a: reverse,
-      aftrekbare_btw_kosten_21: input21,
-      aftrekbare_btw_kosten_9: input9,
-      verschuldigde_btw_totaal: overview.verschuldigd.totaal,
-      aftrekbare_btw_totaal: overview.aftrekbaar.totaal,
-    },
+    transactions, overzicht: overview,
+    breakdown: { verschuldigde_btw_omzet_21: output21, verschuldigde_btw_omzet_9: output9, verlegde_btw_rubriek_2a: reverse, aftrekbare_btw_kosten_21: input21, aftrekbare_btw_kosten_9: input9, verschuldigde_btw_totaal: overview.verschuldigd.totaal, aftrekbare_btw_totaal: overview.aftrekbaar.totaal },
     btw_eindsaldo: overview.netto_btw,
-    herkenning: {
-      totaal_transacties: inputCount,
-      automatisch_herkend: trustedCount,
-      standaard_toegepast: unresolvedCount,
-      percentage_herkend: inputCount === 0 ? 0 : fromCents(toCents((trustedCount / inputCount) * 100)),
-      controle_aanbevolen: unresolvedRows,
-    },
-    audit: {
-      ok: problems.length === 0,
-      problemen: problems,
-      input_count: inputCount,
-      trusted_count: trustedCount,
-      unresolved_count: unresolvedCount,
-      ignored_count: ignoredCount,
-      financial_output_vat: reconciliation.output,
-      financial_input_vat: reconciliation.input,
-      identity_difference: reconciliation.difference,
-    },
-    genegeerde_samenvattingsregels: ignored,
-    mogelijke_dubbele_transacties: duplicates,
+    herkenning: { totaal_transacties: inputCount, automatisch_herkend: trustedCount, standaard_toegepast: unresolvedCount, percentage_herkend: inputCount === 0 ? 0 : fromCents(toCents((trustedCount / inputCount) * 100)), controle_aanbevolen: unresolvedRows },
+    audit: { ok: problems.length === 0, problemen: problems, input_count: inputCount, trusted_count: trustedCount, unresolved_count: unresolvedCount, ignored_count: ignoredCount, financial_output_vat: reconciliation.output, financial_input_vat: reconciliation.input, identity_difference: reconciliation.difference },
+    genegeerde_samenvattingsregels: ignored, mogelijke_dubbele_transacties: duplicates,
   };
 }
 
