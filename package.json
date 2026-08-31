@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
-    "test:btw-safety": "tsx scripts/btwSafetySmoke.ts"
+    "test:btw-safety": "tsx scripts/btwSafetySmoke.ts",
+    "test": "tsx src/lib/__tests__/vatEngine.test.ts && tsx src/lib/__tests__/calculateVatReport.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.17.1",
@@ -39,7 +40,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.9.1",
-    "@types/bcryptjs": "^3.0.0",
+    "@types/bcryptjs": "^3.0.3",
     "@types/express": "^5.0.6",
     "@types/multer": "^2.2.0",
     "@types/node": "^26.1.2",
