@@ -36,8 +36,8 @@ type ClassificationDecision = { classification:FiscalClassification; rate:BtwPer
 const EU = new Set(['AT','BE','BG','HR','CY','CZ','DE','DK','EE','EL','ES','FI','FR','GR','HU','IE','IT','LT','LU','LV','MT','NL','PL','PT','RO','SE','SI','SK']);
 const cents=(n:number)=>{if(!Number.isFinite(n))throw new Error('BTW safety: ongeldig bedrag.');const c=Math.round(n*100);if(!Number.isSafeInteger(c))throw new Error('BTW safety: bedrag te groot.');return c;};
 const euros=(c:number)=>c/100;
-const grossVat=(gross:number,rate:BtwPercentage)=>rate===0?0:Math.round(gross*rate/(100+rate));
-const baseVat=(base:number,rate:9|21)=>Math.round(base*rate/100);
+const grossVat=(grossCents:number,rate:BtwPercentage)=>rate===0?0:Math.round(grossCents*rate/(100+rate));
+const baseVat=(baseCents:number,rate:9|21)=>Math.round(baseCents*rate/100);
 const norm=(s?:string)=>String(s??'').toLowerCase().replace(/\s+/g,' ').trim();
 const isSummary=(tx:RawTransaction)=>/(^|\s)(totaal|subtotaal|eindtotaal|saldo|samenvatting|grand total)(\s|$)|totale btw|btw totaal|kwartaaltotaal|maandtotaal/.test(norm(`${tx.description} ${tx.memo}`));
 const country=(iban?:string)=>String(iban??'').replace(/\s/g,'').slice(0,2).toUpperCase()||null;
@@ -83,9 +83,9 @@ function classify(tx:RawTransaction, override?:BoekhouderBeoordeling):Classifica
 }
 
 function makeTx(tx:RawTransaction,d:ClassificationDecision):FiscalTransaction{
-  const gross=cents(tx.amount_incl), reverse=d.classification==='domestic_reverse_charge'||d.classification==='eu_reverse_charge'||d.classification==='non_eu_reverse_charge';
-  const vatC= d.classification==='unresolved'?null:(reverse?baseVat(gross,d.rate as 9|21):grossVat(gross,d.rate));
-  const excl=vatC===null?null:euros(reverse?gross:gross-vatC); const r=rule(d.classification);
+  const grossCents=cents(tx.amount_incl), reverse=d.classification==='domestic_reverse_charge'||d.classification==='eu_reverse_charge'||d.classification==='non_eu_reverse_charge';
+  const vatC=d.classification==='unresolved'?null:(reverse?baseVat(grossCents,d.rate as 9|21):grossVat(grossCents,d.rate));
+  const excl=vatC===null?null:euros(reverse?grossCents:grossCents-vatC); const r=rule(d.classification);
   return {id:tx.id,date:tx.date,description:tx.description,type:tx.type,amount_incl_input:tx.amount_incl,amount_excl:excl,vat:vatC===null?{status:'unknown',rate:null,amount:null}:{status:'known',rate:d.rate,amount:euros(vatC)},classification:d.classification,section:r.section,deductible:d.deductible,evidenceRequired:r.requiresEvidence,evidenceStatus:d.evidence,confidence:d.confidence,reason:d.reason,rule:r};
 }
 
@@ -97,6 +97,7 @@ export function calculateFiscalVatReport(rows:RawTransaction[],overrides:Record<
   for(const t of transactions){if(t.vat.status!=='known')continue;const v=t.vat.amount,b=t.amount_excl??0;
     if(t.classification==='domestic_output_21'){d21+=v;a['1a'].grondslag+=b;a['1a'].btw+=v;}
     else if(t.classification==='domestic_output_9'){d9+=v;a['1b'].grondslag+=b;a['1b'].btw+=v;}
+    else if(t.classification==='zero_rated_output'){a['1e'].grondslag+=b;}
     else if(t.classification==='domestic_reverse_charge'){dr+=v;a['2a'].grondslag+=b;a['2a'].btw+=v;if(t.deductible&&t.evidenceStatus==='human_confirmed'){ri+=v;a['5b']+=v;}}
     else if(t.classification==='eu_reverse_charge'){er+=v;a['4b'].grondslag+=b;a['4b'].btw+=v;if(t.deductible&&t.evidenceStatus==='human_confirmed'){ri+=v;a['5b']+=v;}}
     else if(t.classification==='non_eu_reverse_charge'){ner+=v;a['4a'].grondslag+=b;a['4a'].btw+=v;if(t.deductible&&t.evidenceStatus==='human_confirmed'){ri+=v;a['5b']+=v;}}
@@ -107,12 +108,12 @@ export function calculateFiscalVatReport(rows:RawTransaction[],overrides:Record<
   const output=euros(cents(d21+d9+dr+er+ner)), input=euros(cents(i21+i9+ri)), netto=euros(cents(output-input));
   const unresolved=transactions.filter(t=>t.classification==='unresolved').length, evidence=transactions.filter(t=>t.evidenceRequired).length;
   const problems:string[]=[]; if(transactions.filter(t=>t.vat.status==='known').some(t=>t.amount_excl===null))problems.push('Bekende btw-transactie zonder grondslag.');
-  const independentOutput=euros(cents(transactions.filter(t=>t.vat.status==='known'&&t.type==='income').reduce((s,t)=>s+t.vat.amount,0)+transactions.filter(t=>t.vat.status==='known'&&(t.classification==='domestic_reverse_charge'||t.classification==='eu_reverse_charge'||t.classification==='non_eu_reverse_charge')).reduce((s,t)=>s+t.vat.amount,0)));
+  const independentOutput=euros(cents(transactions.filter(t=>t.vat.status==='known'&&t.type==='income').reduce((s,t)=>s+(t.vat.status==='known'?t.vat.amount:0),0)+transactions.filter(t=>t.vat.status==='known'&&(t.classification==='domestic_reverse_charge'||t.classification==='eu_reverse_charge'||t.classification==='non_eu_reverse_charge')).reduce((s,t)=>s+(t.vat.status==='known'?t.vat.amount:0),0)));
   if(independentOutput!==output)problems.push('Onafhankelijke verschuldigde-btw-reconciliatie faalt.');
-  const independentInput=euros(cents(transactions.filter(t=>t.vat.status==='known'&&t.type==='expense'&&t.deductible&&t.evidenceStatus==='human_confirmed').reduce((s,t)=>s+t.vat.amount,0)));
+  const independentInput=euros(cents(transactions.filter(t=>t.vat.status==='known'&&t.type==='expense'&&t.deductible&&t.evidenceStatus==='human_confirmed').reduce((s,t)=>s+(t.vat.status==='known'?t.vat.amount:0),0)));
   if(independentInput!==input)problems.push('Onafhankelijke voorbelasting-reconciliatie faalt.');
   if(Math.abs(output-input-netto)>0.001)problems.push('Netto btw sluit niet aan.');
-  return {transactions,overzicht:{output:{domestic21:euros(cents(d21)),domestic9:euros(cents(d9)),domesticReverse:euros(cents(dr)),euReverse:euros(cents(er)),nonEuReverse:euros(cents(ner)),total:output},input:{domestic21:euros(cents(i21)),domestic9:euros(cents(i9)),reverseCharge:euros(cents(ri)),total:input},nonDeductible:euros(cents(nonDed)),netto:netto,status:netto>=0?'af_te_drage':'terug_te_vorderen'},aangifte:a,audit:{ok:problems.length===0,input:rows.length,known:transactions.length-unresolved,unresolved,evidenceRequired:evidence,ignored:ignored.length},ignored};
+  return {transactions,overzicht:{output:{domestic21:euros(cents(d21)),domestic9:euros(cents(d9)),domesticReverse:euros(cents(dr)),euReverse:euros(cents(er)),nonEuReverse:euros(cents(ner)),total:output},input:{domestic21:euros(cents(i21)),domestic9:euros(cents(i9)),reverseCharge:euros(cents(ri)),total:input},nonDeductible:euros(cents(nonDed)),netto:netto,status:netto>=0?'af_te_dragen':'terug_te_vorderen'},aangifte:a,audit:{ok:problems.length===0,problems,input:rows.length,known:transactions.length-unresolved,unresolved,evidenceRequired:evidence,ignored:ignored.length},ignored};
 }
 
 export function tweeKolommenWeergave(report:FiscalReport){return {zeker:report.transactions.filter(t=>t.classification!=='unresolved').map(t=>({transactie_id:t.id,omschrijving:t.description??'',type:t.type,btw:t.vat.status==='known'?`${t.vat.rate}% — €${t.vat.amount.toFixed(2)}`:'onbekend',bedrag:`€${t.amount_incl_input.toFixed(2)}`,toegepaste_regel:t.reason})),twijfelgevallen:report.transactions.filter(t=>t.classification==='unresolved').map(t=>({transactie_id:t.id,omschrijving:t.description??'',bedrag:`€${t.amount_incl_input.toFixed(2)}`,toegepaste_regel:t.reason}))};}
