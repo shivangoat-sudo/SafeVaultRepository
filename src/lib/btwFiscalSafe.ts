@@ -47,7 +47,7 @@ function rule(classification:FiscalClassification):FiscalRule {
   const r:Record<FiscalClassification,FiscalRule>={
     domestic_output_21:{classification,section:'1a',wetsbasis:'Btw-aangifte rubriek 1a',explanation:'Binnenlandse belaste omzet tegen 21%.',requiresEvidence:true},
     domestic_output_9:{classification,section:'1b',wetsbasis:'Btw-aangifte rubriek 1b',explanation:'Binnenlandse belaste omzet tegen 9%.',requiresEvidence:true},
-    zero_rated_output:{classification,section:'3a',wetsbasis:'Btw-aangifte; 0%-situatie vereist feitelijke onderbouwing',explanation:'0% is niet hetzelfde als vrijgesteld; de juiste aangifterubriek hangt af van de concrete prestatie.',requiresEvidence:true},
+    zero_rated_output:{classification,section:'1e',wetsbasis:'Btw-aangifte rubriek 1e; 0% of niet bij u belast',explanation:'0% is niet hetzelfde als vrijgesteld; concrete buitenlandse/overige 0%-situaties moeten op de prestatie worden bevestigd.',requiresEvidence:true},
     exempt_output:{classification,section:'geen',wetsbasis:'Btw-vrijstelling',explanation:'Vrijgestelde omzet heeft geen Nederlandse btw.',requiresEvidence:true},
     domestic_input_21:{classification,section:'5b',wetsbasis:'Btw-aangifte rubriek 5b',explanation:'Nederlandse voorbelasting tegen 21%; alleen aftrekbaar als aan de wettelijke voorwaarden is voldaan.',requiresEvidence:true},
     domestic_input_9:{classification,section:'5b',wetsbasis:'Btw-aangifte rubriek 5b',explanation:'Nederlandse voorbelasting tegen 9%; alleen aftrekbaar als aan de wettelijke voorwaarden is voldaan.',requiresEvidence:true},
@@ -97,11 +97,11 @@ export function calculateFiscalVatReport(rows:RawTransaction[],overrides:Record<
   for(const t of transactions){if(t.vat.status!=='known')continue;const v=t.vat.amount,b=t.amount_excl??0;
     if(t.classification==='domestic_output_21'){d21+=v;a['1a'].grondslag+=b;a['1a'].btw+=v;}
     else if(t.classification==='domestic_output_9'){d9+=v;a['1b'].grondslag+=b;a['1b'].btw+=v;}
-    else if(t.classification==='domestic_reverse_charge'){dr+=v;a['2a'].grondslag+=b;a['2a'].btw+=v;if(t.deductible){ri+=v;a['5b']+=v;}}
-    else if(t.classification==='eu_reverse_charge'){er+=v;a['4b'].grondslag+=b;a['4b'].btw+=v;if(t.deductible){ri+=v;a['5b']+=v;}}
-    else if(t.classification==='non_eu_reverse_charge'){ner+=v;a['4a'].grondslag+=b;a['4a'].btw+=v;if(t.deductible){ri+=v;a['5b']+=v;}}
-    else if(t.classification==='domestic_input_21'&&t.deductible){i21+=v;a['5b']+=v;}
-    else if(t.classification==='domestic_input_9'&&t.deductible){i9+=v;a['5b']+=v;}
+    else if(t.classification==='domestic_reverse_charge'){dr+=v;a['2a'].grondslag+=b;a['2a'].btw+=v;if(t.deductible&&t.evidenceStatus==='human_confirmed'){ri+=v;a['5b']+=v;}}
+    else if(t.classification==='eu_reverse_charge'){er+=v;a['4b'].grondslag+=b;a['4b'].btw+=v;if(t.deductible&&t.evidenceStatus==='human_confirmed'){ri+=v;a['5b']+=v;}}
+    else if(t.classification==='non_eu_reverse_charge'){ner+=v;a['4a'].grondslag+=b;a['4a'].btw+=v;if(t.deductible&&t.evidenceStatus==='human_confirmed'){ri+=v;a['5b']+=v;}}
+    else if(t.classification==='domestic_input_21'&&t.deductible&&t.evidenceStatus==='human_confirmed'){i21+=v;a['5b']+=v;}
+    else if(t.classification==='domestic_input_9'&&t.deductible&&t.evidenceStatus==='human_confirmed'){i9+=v;a['5b']+=v;}
     else if(t.type==='expense'&&v>0)nonDed+=v;
   }
   const output=euros(cents(d21+d9+dr+er+ner)), input=euros(cents(i21+i9+ri)), netto=euros(cents(output-input));
@@ -109,10 +109,10 @@ export function calculateFiscalVatReport(rows:RawTransaction[],overrides:Record<
   const problems:string[]=[]; if(transactions.filter(t=>t.vat.status==='known').some(t=>t.amount_excl===null))problems.push('Bekende btw-transactie zonder grondslag.');
   const independentOutput=euros(cents(transactions.filter(t=>t.vat.status==='known'&&t.type==='income').reduce((s,t)=>s+t.vat.amount,0)+transactions.filter(t=>t.vat.status==='known'&&(t.classification==='domestic_reverse_charge'||t.classification==='eu_reverse_charge'||t.classification==='non_eu_reverse_charge')).reduce((s,t)=>s+t.vat.amount,0)));
   if(independentOutput!==output)problems.push('Onafhankelijke verschuldigde-btw-reconciliatie faalt.');
-  const independentInput=euros(cents(transactions.filter(t=>t.vat.status==='known'&&t.type==='expense'&&t.deductible).reduce((s,t)=>s+t.vat.amount,0)));
+  const independentInput=euros(cents(transactions.filter(t=>t.vat.status==='known'&&t.type==='expense'&&t.deductible&&t.evidenceStatus==='human_confirmed').reduce((s,t)=>s+t.vat.amount,0)));
   if(independentInput!==input)problems.push('Onafhankelijke voorbelasting-reconciliatie faalt.');
   if(Math.abs(output-input-netto)>0.001)problems.push('Netto btw sluit niet aan.');
-  return {transactions,overzicht:{output:{domestic21:euros(cents(d21)),domestic9:euros(cents(d9)),domesticReverse:euros(cents(dr)),euReverse:euros(cents(er)),nonEuReverse:euros(cents(ner)),total:output},input:{domestic21:euros(cents(i21)),domestic9:euros(cents(i9)),reverseCharge:euros(cents(ri)),total:input},nonDeductible:euros(cents(nonDed)),netto:netto,status:netto>=0?'af_te_dragen':'terug_te_vorderen'},aangifte:a,audit:{ok:problems.length===0,input:rows.length,known:transactions.length-unresolved,unresolved,evidenceRequired:evidence,ignored:ignored.length},ignored};
+  return {transactions,overzicht:{output:{domestic21:euros(cents(d21)),domestic9:euros(cents(d9)),domesticReverse:euros(cents(dr)),euReverse:euros(cents(er)),nonEuReverse:euros(cents(ner)),total:output},input:{domestic21:euros(cents(i21)),domestic9:euros(cents(i9)),reverseCharge:euros(cents(ri)),total:input},nonDeductible:euros(cents(nonDed)),netto:netto,status:netto>=0?'af_te_drage':'terug_te_vorderen'},aangifte:a,audit:{ok:problems.length===0,input:rows.length,known:transactions.length-unresolved,unresolved,evidenceRequired:evidence,ignored:ignored.length},ignored};
 }
 
 export function tweeKolommenWeergave(report:FiscalReport){return {zeker:report.transactions.filter(t=>t.classification!=='unresolved').map(t=>({transactie_id:t.id,omschrijving:t.description??'',type:t.type,btw:t.vat.status==='known'?`${t.vat.rate}% — €${t.vat.amount.toFixed(2)}`:'onbekend',bedrag:`€${t.amount_incl_input.toFixed(2)}`,toegepaste_regel:t.reason})),twijfelgevallen:report.transactions.filter(t=>t.classification==='unresolved').map(t=>({transactie_id:t.id,omschrijving:t.description??'',bedrag:`€${t.amount_incl_input.toFixed(2)}`,toegepaste_regel:t.reason}))};}
