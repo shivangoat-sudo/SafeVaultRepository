@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/api";
 import { useToast } from "@/components/Toast";
 import { EmptyState, Spinner } from "@/components/ui";
-import { parseCsvToRawTransactions } from "@/utils/vatCalculator";
+import { parseCsvToRawTransactions } from "@/utils/vatCsvParser";
 import { calculateVatReport, tweeKolommenWeergave, berekenBetrouwbaarheidsscore, BOEKHOUDER_PERCENTAGE_OPTIES, type VatReport, type RawTransaction, type BtwPercentage, type BoekhouderBeoordeling } from "@/lib/btwEngineSafe";
 import { Calculator, AlertTriangle, CheckCircle2, TrendingDown, TrendingUp, ArrowDownUp, FileSpreadsheet, UserCheck } from "lucide-react";
 import type { FileRow } from "@/types";
