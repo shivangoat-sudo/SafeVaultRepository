@@ -13,7 +13,10 @@ const unknownExpense = calculateVatReport([{ id: 'unknown-expense', type: 'expen
 assert.equal(unknownExpense.overzicht.aftrekbaar.totaal, 0);
 assert.equal(isTwijfelgeval(unknownExpense.transactions[0]), true);
 
-const knownZero = calculateVatReport([{ id: 'known-zero', type: 'income', amount_incl: 100, description: 'Overheidsvergoeding' }]);
+const knownZero = calculateVatReport(
+  [{ id: 'known-zero', type: 'income', amount_incl: 100, description: 'Overheidsvergoeding' }],
+  { classifications: { 'known-zero': 'omzet_vrijgesteld_0' } }
+);
 assert.deepEqual(knownZero.transactions[0].vat, { status: 'known', rate: 0, amount: 0 });
 assert.equal(isTwijfelgeval(knownZero.transactions[0]), false);
 
