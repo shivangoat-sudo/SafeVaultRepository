@@ -17,8 +17,8 @@ jobs:
       - run: npm install
       - name: Verify safe production boundary
         run: |
-          if grep -R --exclude-dir=node_modules --exclude-dir=.git -nE 'from ["'"'](@/lib/)?btwEngine(["'"']|\.)|require\(["'"'].*btwEngine' src/components src/pages src/hooks src/services src/lib 2>/dev/null; then
-            echo 'Direct legacy VAT engine import found in production code'
+          if find src -type f \( -name '*.ts' -o -name '*.tsx' \) ! -name 'btwEngineSafe.ts' ! -name 'btwEngine.ts' ! -name 'btwEngine.validatie.ts' -print0 | xargs -0 grep -nE 'from ["'"']([^"'"']*/)?btwEngine(["'"']|\.)|require\(["'"'].*btwEngine' 2>/dev/null; then
+            echo 'Direct legacy VAT engine import found outside the approved safe facade'
             exit 1
           fi
       - name: Typecheck
