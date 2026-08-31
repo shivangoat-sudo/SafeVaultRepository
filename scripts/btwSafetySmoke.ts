@@ -24,7 +24,10 @@ const knownIncome = calculateVatReport([{ id: 'known-income', type: 'income', am
 assert.equal(knownIncome.overzicht.verschuldigd.inkomsten_9, 9);
 assert.equal(knownIncome.overzicht.netto_btw, 9);
 
-const knownExpense = calculateVatReport([{ id: 'known-expense', type: 'expense', amount_incl: 121, description: 'Software abonnement' }]);
+const knownExpense = calculateVatReport(
+  [{ id: 'known-expense', type: 'expense', amount_incl: 121, description: 'Software abonnement' }],
+  { classifications: { 'known-expense': 'kosten_algemeen_21' } }
+);
 assert.equal(knownExpense.overzicht.aftrekbaar.uitgaven_21, 21);
 
 const nonDeductible = calculateVatReport(
