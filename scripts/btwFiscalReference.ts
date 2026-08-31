@@ -18,9 +18,6 @@ const rows = [
 const r = calculateFiscalVatReport(rows, {
   buy21:{percentage:21, beoordeeld_door:'test-boekhouder'},
   buy9:{percentage:9, beoordeeld_door:'test-boekhouder'},
-  domesticRc:{percentage:21, beoordeeld_door:'test-boekhouder'},
-  eu:{percentage:21, beoordeeld_door:'test-boekhouder'},
-  nonEu:{percentage:21, beoordeeld_door:'test-boekhouder'},
 });
 
 assert.equal(r.aangifte['1a'].btw, 21);
@@ -28,7 +25,7 @@ assert.equal(r.aangifte['1b'].btw, 9);
 assert.equal(r.aangifte['2a'].btw, 21);
 assert.equal(r.aangifte['4b'].btw, 21);
 assert.equal(r.aangifte['4a'].btw, 21);
-assert.equal(r.aangifte['5b'], 21 + 9 + 21 + 21 + 21);
+assert.equal(r.aangifte['5b'], 21 + 9);
 assert.equal(r.overzicht.nonDeductible, 9);
 assert.equal(r.ignored.length, 1);
 assert.equal(r.audit.input, 11);
