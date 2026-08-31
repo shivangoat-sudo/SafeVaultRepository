@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { calculateVatReport, isTwijfelgeval } from '../src/lib/btwEngineSafe';
+import { parseCsvToRawTransactions } from '../src/utils/vatCsvParser';
 
 const unknownIncome = calculateVatReport([{ id: 'unknown-income', type: 'income', amount_incl: 121, description: 'Onbekende klantbetaling' }]);
 assert.equal(unknownIncome.overzicht.verschuldigd.totaal, 0);
@@ -97,6 +98,9 @@ const summary = calculateVatReport([
 assert.equal(summary.genegeerde_samenvattingsregels.length, 1);
 assert.equal(summary.audit.input_count, 3);
 assert.equal(summary.audit.ignored_count, 1);
+
+const ambiguousDirectionCsv = 'Datum;Naam / Omschrijving;Af Bij;Bedrag (EUR)\n20260831;Test;onbekend;100,00\n';
+assert.throws(() => parseCsvToRawTransactions(ambiguousDirectionCsv));
 
 const largeDataset = Array.from({ length: 10_000 }, (_, i) => ({ id: `scale-${i}`, type: 'income' as const, amount_incl: 109, description: 'Verkoop boek' }));
 const largeReport = calculateVatReport(largeDataset);
