@@ -18,6 +18,13 @@ assert.equal(unknownIncome.audit.ok, true);
 assert.equal(unknownIncome.transactions[0].vat.status, 'known');
 assert.equal(unknownIncome.transactions[0].confidence, 'low');
 
+const automaticNinePercent = calculateFiscalVatReport([{ id: 'automatic-9', type: 'income', amount_incl: 109, description: 'Verkoop boek 9%' }]);
+assert.equal(automaticNinePercent.transactions[0].classification, 'domestic_output_9');
+assert.equal(automaticNinePercent.transactions[0].vat.status, 'known');
+assert.equal(automaticNinePercent.transactions[0].vat.rate, 9);
+assert.equal(automaticNinePercent.aangifte['1b'].btw, 9);
+assert.equal(automaticNinePercent.aangifte['1a'].btw, 0);
+
 const unknownExpense = calculateFiscalVatReport([{ id: 'unknown-expense', type: 'expense', amount_incl: 121, description: 'Onbekende zakelijke inkoop' }]);
 assert.equal(unknownExpense.aangifte['5b'], 21);
 assert.equal(unknownExpense.overzicht.netto, -21);
