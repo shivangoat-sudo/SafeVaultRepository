@@ -1,4 +1,4 @@
-import { calculateFiscalVatReport } from '../btwFiscalSafeCore';
+import { calculateFiscalVatReport } from '../btwFiscalSafePolicy';
 import type { RawTransaction } from '../btwSafeTypes';
 
 type Review = Parameters<typeof calculateFiscalVatReport>[1];
@@ -25,4 +25,4 @@ if (report.aangifte['5b'] !== 30) throw new Error(`5b verwacht €30, kreeg ${re
 if (report.aangifte['5a'] !== 30) throw new Error(`5a verwacht €30, kreeg ${report.aangifte['5a']}`);
 if (report.overzicht.netto !== 0) throw new Error(`netto verwacht €0, kreeg ${report.overzicht.netto}`);
 
-console.log('OK: vatEngine regression test now verifies the production fiscal core.');
+console.log('OK: VAT regression test verifies the production fiscal policy facade.');
