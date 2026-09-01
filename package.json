@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
-    "test:btw-safety": "tsx scripts/btwSafetySmoke.ts && tsx scripts/btwFiscalV3Reference.ts && tsx scripts/btwCsvSafetyReference.ts",
+    "test:btw-safety": "tsx scripts/btwSafetySmoke.ts && tsx scripts/btwFiscalV3Reference.ts && tsx scripts/btwCsvSafetyReference.ts && tsx scripts/btwParserReference.ts",
     "test": "tsx src/lib/__tests__/vatEngine.test.ts && tsx src/lib/__tests__/calculateVatReport.test.ts"
   },
   "dependencies": {
