@@ -5,6 +5,7 @@ import {
   type FiscalReport,
 } from './btwFiscalSafeCore';
 import type { RawTransaction } from './btwSafeTypes';
+import { controleerIngediendeBtwPost } from './btwSubmissionValidator';
 
 /**
  * Dutch fiscal policy guard around the production core.
@@ -16,8 +17,6 @@ import type { RawTransaction } from './btwSafeTypes';
 export const NEDERLANDS_OVERIG_TARIEF_1C = 13 as const;
 
 function protectLegitimateMerchantNames(rows: RawTransaction[]): RawTransaction[] {
-  // The historical core has conservative summary-row detection. It must not
-  // drop a real merchant whose name starts with "Totaal" or "Saldo".
   return rows.map(row => {
     const description = String(row.description ?? '').trim();
     const first = description.toLowerCase().split(/\s+/)[0] ?? '';
@@ -27,6 +26,34 @@ function protectLegitimateMerchantNames(rows: RawTransaction[]): RawTransaction[
     }
     return row;
   });
+}
+
+function validateSubmittedVat(rows: RawTransaction[]) {
+  const problems:string[] = [];
+  let checked = 0;
+  let deviations = 0;
+  for (const row of rows) {
+    const hasSubmitted = row.submitted_amount_excl !== undefined || row.submitted_vat_amount !== undefined || row.submitted_vat_percentage !== undefined || row.submitted_section !== undefined;
+    if (!hasSubmitted) continue;
+    checked++;
+    const result = controleerIngediendeBtwPost({
+      id: row.id,
+      amount_incl: row.amount_incl,
+      amount_excl: row.submitted_amount_excl,
+      btw_bedrag: row.submitted_vat_amount,
+      btw_percentage: row.submitted_vat_percentage,
+      rubriek: row.submitted_section as any,
+      type: row.type,
+      omschrijving: row.description,
+    });
+    if (result.status === 'afwijking') {
+      deviations++;
+      for (const problem of result.afwijkingen) problems.push(`${row.id}: ${problem}`);
+    } else if (result.status === 'onvoldoende_gegevens') {
+      problems.push(`${row.id}: aangeleverde BTW-gegevens zijn onvolledig en kunnen niet volledig worden gecontroleerd.`);
+    }
+  }
+  return { checked, deviations, problems };
 }
 
 export function calculateFiscalVatReport(
@@ -40,7 +67,14 @@ export function calculateFiscalVatReport(
     }
   }
 
-  return calculateCore(protectLegitimateMerchantNames(rows), overrides, adjustments);
+  const safeRows = protectLegitimateMerchantNames(rows);
+  const report = calculateCore(safeRows, overrides, adjustments);
+  const submitted = validateSubmittedVat(rows);
+  if (submitted.checked > 0) {
+    report.audit.problems = [...report.audit.problems, ...submitted.problems];
+    report.audit.ok = report.audit.ok && submitted.deviations === 0 && submitted.problems.length === 0;
+  }
+  return report;
 }
 
 export type {
