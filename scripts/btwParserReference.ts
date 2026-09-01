@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import { parseDutchAmount, parseCsvToRawTransactions } from '../src/utils/vatCsvParser';
+assert.equal(parseDutchAmount('121,50'),121.5);
+assert.equal(parseDutchAmount('1.234,56'),1234.56);
+assert.equal(parseDutchAmount('1.234'),1234);
+assert.equal(parseDutchAmount('1234.56'),1234.56);
+assert.equal(parseDutchAmount('1,234'),1234);
+assert.equal(parseDutchAmount('(121,50)'),-121.5);
+assert.equal(parseDutchAmount('€ 121,50'),121.5);
+assert.equal(parseDutchAmount('12.345,67'),12345.67);
+assert.equal(parseDutchAmount('12,345.67'),12345.67);
+assert.equal(parseDutchAmount('not-a-number'),null);
+const csv='Datum;Naam / Omschrijving;Tegenrekening;Af Bij;Bedrag;Mededelingen\n2026-01-01;Klant;NL00TEST;Bij;1.234,56;Factuur';
+const rows=parseCsvToRawTransactions(csv); assert.equal(rows.length,1); assert.equal(rows[0].amount_incl,1234.56); assert.equal(rows[0].type,'income');
+console.log('BTW parser reference tests passed');
