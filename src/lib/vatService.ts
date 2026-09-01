@@ -6,7 +6,7 @@
  * domestic 21%/9% rate. It deliberately fails closed for reverse-charge and
  * other cases that require the full fiscal model.
  */
-import { calculateFiscalVatReport } from './btwFiscalSafePolicy';
+import { calculateFiscalVatReport, type BoekhouderBeoordeling, type FiscalClassification } from './btwFiscalSafePolicy';
 
 export interface VatReturnInput {
   companyId: string;
@@ -33,6 +33,13 @@ function round2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+function domesticClassification(rate: number, direction: 'income' | 'expense', deductible: boolean): FiscalClassification {
+  if (direction === 'income') return rate === 21 ? 'domestic_output_21' : rate === 9 ? 'domestic_output_9' : 'zero_rated_output';
+  if (rate === 21) return deductible ? 'domestic_input_21' : 'non_deductible_input_21';
+  if (rate === 9) return deductible ? 'domestic_input_9' : 'non_deductible_input_9';
+  return 'zero_rated_input';
+}
+
 /**
  * Compatibility adapter. Expenses are only deductible when isDeductible is
  * explicitly true. Reverse-charge, foreign VAT and other special regimes must
@@ -50,35 +57,36 @@ export function generateVatReturn(
   }>,
   input: VatReturnInput,
 ): VatReturnResult {
-  const rows = transactions.map((t, index) => {
+  const rows: Array<{ id: string; type: 'income' | 'expense'; amount_incl: number; description: string; override: BoekhouderBeoordeling }> = [];
+
+  transactions.forEach((t, index) => {
     if (!Number.isFinite(t.amountIncl) || !Number.isFinite(t.vatAmount)) {
       throw new Error(`BTW service: ongeldig bedrag op transactie ${index + 1}.`);
     }
     if (t.vatStatus === 'reverse_charge' || t.vatStatus === 'verlegd') {
       throw new Error('BTW service: verleggingsregelingen moeten via de volledige fiscale calculator worden verwerkt.');
     }
-    if (t.vatStatus === 'none' || t.vatStatus === 'uncertain' || t.vatRate === null) return null;
-    if (t.isVatRevenue === false && t.direction === 'income') return null;
+    if (t.vatStatus === 'none' || t.vatStatus === 'uncertain' || t.vatRate === null) return;
+    if (t.isVatRevenue === false && t.direction === 'income') return;
     if (t.vatRate !== 0 && t.vatRate !== 9 && t.vatRate !== 21) {
       throw new Error(`BTW service: niet-ondersteund btw-tarief ${t.vatRate}%.`);
     }
 
-    const id = `compat-${index + 1}`;
-    if (t.direction === 'income') {
-      const classification = t.vatRate === 21 ? 'domestic_output_21' : t.vatRate === 9 ? 'domestic_output_9' : 'zero_rated_output';
-      return { id, type: 'income' as const, amount_incl: t.amountIncl, description: 'Legacy reviewed VAT service', override: { classificatie: classification as any, beoordeeld_door: 'Legacy adapter', percentage: t.vatRate } };
-    }
+    const classification = domesticClassification(t.vatRate, t.direction, t.isDeductible === true);
+    rows.push({
+      id: `compat-${index + 1}`,
+      type: t.direction,
+      amount_incl: t.amountIncl,
+      description: 'Legacy reviewed VAT service',
+      override: {
+        classificatie: classification,
+        beoordeeld_door: 'Legacy adapter',
+        percentage: t.vatRate,
+      },
+    });
+  });
 
-    const classification = t.vatRate === 21
-      ? (t.isDeductible === true ? 'domestic_input_21' : 'non_deductible_input_21')
-      : t.vatRate === 9
-        ? (t.isDeductible === true ? 'domestic_input_9' : 'non_deductible_input_9')
-        : 'zero_rated_input';
-    return { id, type: 'expense' as const, amount_incl: t.amountIncl, description: 'Legacy reviewed VAT service', override: { classificatie: classification as any, beoordeeld_door: 'Legacy adapter', percentage: t.vatRate } };
-  }).filter((row): row is NonNullable<typeof row> => row !== null);
-
-  const overrides: Record<string, { classificatie: any; beoordeeld_door: string; percentage?: number }> = {};
-  for (const row of rows) overrides[row.id] = row.override;
+  const overrides: Record<string, BoekhouderBeoordeling> = Object.fromEntries(rows.map(row => [row.id, row.override]));
   const report = calculateFiscalVatReport(rows.map(({ override: _override, ...row }) => row), overrides);
 
   for (let i = 0; i < transactions.length; i++) {
