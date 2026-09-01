@@ -10,7 +10,7 @@ assert.equal(auto.overzicht.input.total, 0);
 assert.equal(auto.audit.included, 0);
 assert.equal(auto.audit.evidenceRequired, 2);
 assert.equal(auto.transactions[0].includedInTotals, false);
-assert.equal(auto.transactions[0].vat.status, 'known');
+assert.equal(auto.transactions[0].vat.status, 'unknown');
 
 const confirmed = calculateFiscalVatReport([
   { id:'sale', type:'income', amount_incl:121, description:'Verkoop software 21%' },
