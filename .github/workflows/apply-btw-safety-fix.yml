@@ -15,8 +15,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Install locked dependencies
-        run: npm ci
+      - name: Install dependencies
+        run: npm install
       - name: Verify safe production boundary
         run: |
           if find src -type f \( -name '*.ts' -o -name '*.tsx' \) ! -name 'btwEngineSafe.ts' ! -name 'btwEngine.ts' ! -name 'btwEngine.validatie.ts' ! -name 'vatEngine.ts' ! -name 'vatCalculator.ts' -print0 | xargs -0 grep -nE 'from [^ ]*btwEngine(\.js)?([^A-Za-z0-9_]|$)|require\([^)]*btwEngine(\.js)?([^A-Za-z0-9_]|$)' 2>/dev/null; then
