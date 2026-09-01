@@ -15,6 +15,20 @@ import type { RawTransaction } from './btwSafeTypes';
  */
 export const NEDERLANDS_OVERIG_TARIEF_1C = 13 as const;
 
+function protectLegitimateMerchantNames(rows: RawTransaction[]): RawTransaction[] {
+  // The historical core has conservative summary-row detection. It must not
+  // drop a real merchant whose name starts with "Totaal" or "Saldo".
+  return rows.map(row => {
+    const description = String(row.description ?? '').trim();
+    const first = description.toLowerCase().split(/\s+/)[0] ?? '';
+    const exact = description.toLowerCase();
+    if ((first === 'totaal' || first === 'saldo') && exact !== first) {
+      return { ...row, description: `\u2063${row.description ?? ''}` };
+    }
+    return row;
+  });
+}
+
 export function calculateFiscalVatReport(
   rows: RawTransaction[],
   overrides: Record<string, BoekhouderBeoordeling> = {},
@@ -26,7 +40,7 @@ export function calculateFiscalVatReport(
     }
   }
 
-  return calculateCore(rows, overrides, adjustments);
+  return calculateCore(protectLegitimateMerchantNames(rows), overrides, adjustments);
 }
 
 export type {
