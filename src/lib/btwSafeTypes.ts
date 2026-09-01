@@ -9,6 +9,10 @@ export interface RawTransaction {
   amount_incl: number;
   type: TransactionType;
   tegenrekening_iban?: string;
+  submitted_amount_excl?: number;
+  submitted_vat_amount?: number;
+  submitted_vat_percentage?: BtwPercentage;
+  submitted_section?: string;
 }
 
 export function genereerStabielTransactieId(input: Pick<RawTransaction, 'date' | 'description' | 'amount_incl' | 'tegenrekening_iban'>): string {
