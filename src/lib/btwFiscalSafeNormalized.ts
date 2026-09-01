@@ -13,7 +13,11 @@ import type {
   FiscalSection,
   FiscalTransaction,
 } from './btwFiscalSafeCore';
-import { BOEKHOUDER_PERCENTAGE_OPTIES, tweeKolommenWeergave, berekenBetrouwbaarheidsscore } from './btwFiscalSafeCore';
+import {
+  BOEKHOUDER_PERCENTAGE_OPTIES,
+  tweeKolommenWeergave as coreTweeKolommenWeergave,
+  berekenBetrouwbaarheidsscore as coreBerekenBetrouwbaarheidsscore,
+} from './btwFiscalSafeCore';
 
 /**
  * Public production report shape.
@@ -28,6 +32,16 @@ export type FiscalReport = Omit<CoreFiscalReport, 'overzicht'> & {
     status: 'af_te_dragen' | 'terug_te_vorderen';
   };
 };
+
+function toCoreReport(report: FiscalReport): CoreFiscalReport {
+  return {
+    ...report,
+    overzicht: {
+      ...report.overzicht,
+      status: report.overzicht.status === 'af_te_dragen' ? 'af_te_drager' : 'terug_te_vorderen',
+    },
+  };
+}
 
 export function calculateFiscalVatReport(
   rows: import('./btwSafeTypes').RawTransaction[],
@@ -44,7 +58,19 @@ export function calculateFiscalVatReport(
   };
 }
 
-export { NEDERLANDS_OVERIG_TARIEF_1C, BOEKHOUDER_PERCENTAGE_OPTIES, tweeKolommenWeergave, berekenBetrouwbaarheidsscore };
+/**
+ * Compatibility wrappers keep the core's historical internal status type out
+ * of the production/UI contract. The frontend remains completely unchanged.
+ */
+export function tweeKolommenWeergave(report: FiscalReport) {
+  return coreTweeKolommenWeergave(toCoreReport(report));
+}
+
+export function berekenBetrouwbaarheidsscore(report: FiscalReport) {
+  return coreBerekenBetrouwbaarheidsscore(toCoreReport(report));
+}
+
+export { NEDERLANDS_OVERIG_TARIEF_1C, BOEKHOUDER_PERCENTAGE_OPTIES };
 export { FISCAL_CLASSIFICATION_OPTIONS } from './btwFiscalSafeUiOptions';
 export type {
   BtwPercentage,
