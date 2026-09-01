@@ -40,6 +40,13 @@ assert(report.overzicht.netto === 0, `netto moet €0 zijn, kreeg ${report.overz
 assert(report.audit.unresolved === 0, 'Er mogen geen onopgeloste transacties zijn na expliciete beoordeling.');
 assert(report.audit.included === rows.length, 'Alle bevestigde transacties moeten worden meegenomen.');
 
+const merchantNamedTotaal = calculateFiscalVatReport(
+  [{ id: 'merchant-totaal', amount_incl: 121, type: 'income', description: 'Totaal Energie' }],
+  { 'merchant-totaal': review('domestic_output_21') },
+);
+assert(merchantNamedTotaal.audit.ignored === 0, 'Een echte merchantnaam die met Totaal begint mag niet als samenvattingsregel worden genegeerd.');
+assert(merchantNamedTotaal.aangifte['1a'].btw === 21, 'Totaal Energie moet als echte 21%-transactie worden verwerkt.');
+
 const unresolved = calculateFiscalVatReport(rows);
 assert(unresolved.aangifte['5a'] === 0 && unresolved.aangifte['5b'] === 0, 'Onbeoordeelde transacties mogen niet in de totalen komen.');
 assert(unresolved.audit.unresolved === rows.length, 'Alle onbeoordeelde transacties moeten unresolved zijn.');
@@ -82,4 +89,4 @@ try {
 }
 assert(threw, 'Dubbele transactie-ID moet worden geweigerd.');
 
-console.log('OK: veilige fiscale rapportage, Nederlandse 1c-policy, verlegging 9/21%, fail-closed classificatie en reconciliatie.');
+console.log('OK: veilige fiscale rapportage, Nederlandse 1c-policy, merchant-summary safety, verlegging 9/21%, fail-closed classificatie en reconciliatie.');
