@@ -25,6 +25,12 @@ jobs:
             echo 'Direct legacy VAT engine import found in production code'
             exit 1
           fi
+      - name: Verify no legacy fiscal facade in production imports
+        run: |
+          if find src -type f \( -name '*.ts' -o -name '*.tsx' \) ! -name 'btwFiscalSafe.ts' ! -name 'btwFiscalSafeV2.ts' ! -name 'btwFiscalSafeV3.ts' ! -name 'btwFiscalSafeFinal.ts' ! -name 'btwFiscalSafeNormalized.ts' -print0 | xargs -0 grep -nE "from ['\"][^'\"]*btwFiscalSafe(\.js|V2\.js|V3\.js|Final\.js|Normalized\.js)?['\"]|require\([^)]*btwFiscalSafe" 2>/dev/null; then
+            echo 'Legacy fiscal facade import found in production code'
+            exit 1
+          fi
       - name: Typecheck
         run: npm run typecheck
       - name: Safety tests
