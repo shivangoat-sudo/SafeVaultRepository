@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
-    "test:btw-safety": "tsx scripts/btwSafetySmoke.ts && tsx scripts/btwFiscalReference.ts",
+    "test:btw-safety": "tsx scripts/btwSafetySmoke.ts && tsx scripts/btwFiscalV3Reference.ts",
     "test": "tsx src/lib/__tests__/vatEngine.test.ts && tsx src/lib/__tests__/calculateVatReport.test.ts"
   },
   "dependencies": {
@@ -41,9 +41,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.9.0",
-    "@types/bcryptjs": "^3.0.0",
-    "@types/express": "^5.0.6",
-    "@types/multer": "^2.2.0",
+    "@types/bcryptjs": "^3.0.3",
     "@types/node": "^26.1.2",
     "@types/nodemailer": "^8.0.1",
     "@types/react": "^18.3.5",
