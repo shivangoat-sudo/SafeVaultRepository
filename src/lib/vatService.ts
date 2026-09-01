@@ -33,7 +33,7 @@ function round2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-function domesticClassification(rate: number, direction: 'income' | 'expense', deductible: boolean): FiscalClassification {
+function domesticClassification(rate: number, direction: 'income' | 'expense', deductible: boolean): Exclude<FiscalClassification, 'unresolved'> {
   if (direction === 'income') return rate === 21 ? 'domestic_output_21' : rate === 9 ? 'domestic_output_9' : 'zero_rated_output';
   if (rate === 21) return deductible ? 'domestic_input_21' : 'non_deductible_input_21';
   if (rate === 9) return deductible ? 'domestic_input_9' : 'non_deductible_input_9';
