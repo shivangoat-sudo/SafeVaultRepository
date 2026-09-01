@@ -27,12 +27,11 @@ export interface FiscalTransaction {
   classification:FiscalClassification; section:FiscalSection; deductible:boolean;
   evidenceRequired:boolean; evidenceStatus:'required'|'human_confirmed'|'not_required'; confidence:'high'|'low';
   includedInTotals:boolean; reason:string; rule:FiscalRule;
-  /* Backwards-compatible table fields. Frontend is intentionally unchanged. */
   transactie_id:string; omschrijving:string; bedrag:number; btw:number|null; toegepaste_regel:string;
 }
 export interface FiscalReport {
   transactions:FiscalTransaction[];
-  overzicht:{output:{domestic21:number;domestic9:number;domesticOther:number;domesticReverse:number;euReverse:number;nonEuReverse:number;privateUse:number;total:number};input:{domestic21:number;domestic9:number;reverseCharge:number;total:number};nonDeductible:number;netto:number;status:'af_te_dragen'|'terug_te_vorderen'};
+  overzicht:{output:{domestic21:number;domestic9:number;domesticOther:number;domesticReverse:number;euReverse:number;nonEuReverse:number;privateUse:number;total:number};input:{domestic21:number;domestic9:number;reverseCharge:number;total:number};nonDeductible:number;netto:number;status:'af_te_drager'|'terug_te_vorderen'};
   aangifte:{'1a':{grondslag:number;btw:number};'1b':{grondslag:number;btw:number};'1c':{grondslag:number;btw:number};'1d':{grondslag:number;btw:number};'1e':{grondslag:number;btw:number};'2a':{grondslag:number;btw:number};'3a':{grondslag:number;btw:number};'3b':{grondslag:number;btw:number};'4a':{grondslag:number;btw:number};'4b':{grondslag:number;btw:number};'5a':number;'5b':number};
   audit:{ok:boolean;problems:string[];input:number;known:number;unresolved:number;evidenceRequired:number;ignored:number;included:number};
   ignored:Array<{id:string;reason:string}>;
@@ -59,7 +58,7 @@ function rule(x:FiscalClassification):FiscalRule {
   const explanation:Record<FiscalSection,string>={
     '1a':'Binnenlandse omzet belast tegen 21% (Wet OB 1968, art. 9 lid 1).',
     '1b':'Binnenlandse omzet belast tegen 9% indien de prestatie onder Tabel I valt (Wet OB 1968, art. 9 lid 2).',
-    '1c':'Overig tarief; alleen gebruiken voor een expliciete fiscale correctie.',
+    '1c':'Overig tarief; alleen gebruiken voor een expliciete fiscale correctie, zoals het 13%-forfait voor sportkantines.',
     '1d':'Privégebruik; alleen via een expliciete fiscale correctie.',
     '1e':'0%-tarief of vrijstelling; de wettelijke voorwaarden bepalen de behandeling.',
     '2a':'Binnenlandse verlegging; verschuldigde en aftrekbare btw worden afzonderlijk verwerkt waar aftrek is toegestaan.',
@@ -70,54 +69,62 @@ function rule(x:FiscalClassification):FiscalRule {
   };
   return {classification:x,section:s,wetsbasis:`Btw-aangifte rubriek ${s==='geen'?'—':s}`,explanation:explanation[s],requiresEvidence:false};
 }
-function classifyFromText(tx:RawTransaction):{x:FiscalClassification;reason:string;p?:number}|null {
+
+type ClassificationHit={x:FiscalClassification;reason:string;confidence:'high'|'low';p?:number};
+function classifyFromText(tx:RawTransaction):ClassificationHit|null {
   const text=norm(`${tx.description} ${tx.memo}`); if(!text)return null;
-  if(/\b(priv[eé](?:-opname| opname)?|priveopname|prive storting|privestorting)\b/i.test(text))return{x:'private_no_vat',reason:'Privétransactie herkend; geen btw-prestatie.'};
-  if(/\b(export|uitvoer|exporteren)\b/i.test(text)&&tx.type==='income')return{x:'non_eu_output_0',reason:'Uitvoer-signaal gevonden; 0% toegepast, wettelijke uitvoervoorwaarden blijven van belang.'};
-  if(/\b(vrijgesteld|vrijstelling|btw-vrij|zonder btw wegens vrijstelling)\b/i.test(text))return{x:tx.type==='income'?'exempt_output':'exempt_input',reason:'Expliciete vermelding van vrijstelling.'};
+  if(/\b(priv[eé](?:-opname| opname)?|priveopname|prive storting|privestorting)\b/i.test(text))return{x:'private_no_vat',reason:'Privétransactie herkend; geen btw-prestatie.',confidence:'high'};
+  if(tx.type==='expense'&&/\b(belastingdienst|belastingaanslag|inkomstenbelasting|loonheffing|premie volksverzekering)\b/i.test(text))return{x:'private_no_vat',reason:'Belastingbetaling herkend; dit is geen btw op een inkoop.',confidence:'low'};
+  if(tx.type==='expense'&&/\b(bankkosten|bankkosten|bank fee|rekeningkosten|betaalrekening|overboekingkosten)\b/i.test(text))return{x:'exempt_input',reason:'Betalingsverkeer/bankkosten: financiële dienstverlening kan van btw zijn vrijgesteld.',confidence:'low'};
+  if(/\b(export|uitvoer|exporteren)\b/i.test(text)&&tx.type==='income')return{x:'non_eu_output_0',reason:'Uitvoer-signaal gevonden; 0% toegepast, wettelijke uitvoervoorwaarden blijven van belang.',confidence:'low'};
+  if(/\b(vrijgesteld|vrijstelling|btw-vrij|zonder btw wegens vrijstelling)\b/i.test(text))return{x:tx.type==='income'?'exempt_output':'exempt_input',reason:'Expliciete vermelding van vrijstelling.',confidence:'high'};
   const pct0=/(^|[^0-9])0\s*%([^0-9]|$)/.test(text),pct9=/(^|[^0-9])9\s*%([^0-9]|$)/.test(text),pct21=/(^|[^0-9])21\s*%([^0-9]|$)/.test(text);
   if(/\b(btw verlegd|btw-verlegd|verlegde btw|reverse charge)\b/i.test(text)){
     const country=String(tx.tegenrekening_iban??'').replace(/\s/g,'').toUpperCase().slice(0,2);
-    if(country&&/^[A-Z]{2}$/.test(country))return{x:country==='NL'?'domestic_reverse_charge':EU.has(country)?'eu_reverse_charge':'non_eu_reverse_charge',reason:`Verleggingssignaal met landcode ${country}.`};
+    if(country&&/^[A-Z]{2}$/.test(country))return{x:country==='NL'?'domestic_reverse_charge':EU.has(country)?'eu_reverse_charge':'non_eu_reverse_charge',reason:`Verleggingssignaal met landcode ${country}.`,confidence:'high'};
   }
-  if(pct0)return{x:tx.type==='income'?'zero_rated_output':'zero_rated_input',reason:'Expliciet 0%-tarief in de bankomschrijving.'};
-  if(pct9)return{x:tx.type==='income'?'domestic_output_9':'domestic_input_9',reason:'Expliciet 9%-tarief in de bankomschrijving.'};
-  if(pct21)return{x:tx.type==='income'?'domestic_output_21':'domestic_input_21',reason:'Expliciet 21%-tarief in de bankomschrijving.'};
-  if(tx.type==='expense'&&/\b(restaurant|catering|horeca|lunch|diner)\b/i.test(text))return{x:'horeca_bua_9',reason:'Horeca-uitgave herkend; btw is niet zonder meer aftrekbaar wegens BUA/zakelijke voorwaarden.'};
+  if(pct0)return{x:tx.type==='income'?'zero_rated_output':'zero_rated_input',reason:'Expliciet 0%-tarief in de bankomschrijving.',confidence:'high'};
+  if(pct9)return{x:tx.type==='income'?'domestic_output_9':'domestic_input_9',reason:'Expliciet 9%-tarief in de bankomschrijving.',confidence:'high'};
+  if(pct21)return{x:tx.type==='income'?'domestic_output_21':'domestic_input_21',reason:'Expliciet 21%-tarief in de bankomschrijving.',confidence:'high'};
+  if(tx.type==='expense'&&/\b(restaurant|catering|horeca|café|cafe|lunch|diner)\b/i.test(text))return{x:'horeca_bua_9',reason:'Horeca-uitgave herkend; btw op eten en drinken ter plaatse is niet aftrekbaar.',confidence:'low'};
+  if(tx.type==='expense'&&/\b(jumbo|albert heijn|ah\b|plus supermarkt|aldi|lidl|supermarkt|bakker|slager)\b/i.test(text))return{x:'domestic_input_9',reason:'Nederlandse voedingsmiddelen-/supermarktuitgave herkend; 9% is toegepast als werkhypothese, met lage zekerheid voor gemengde boodschappen.',confidence:'low'};
+  const country=String(tx.tegenrekening_iban??'').replace(/\s/g,'').toUpperCase().slice(0,2);
+  if(tx.type==='expense'&&country&&country!=='NL'&&/^[A-Z]{2}$/.test(country)&&/\b(llc|inc\.?|ltd\.?|software|saas|subscription|dienst|diensten|service|consulting|consultancy)\b/i.test(text)){
+    return{x:EU.has(country)?'eu_reverse_charge':'non_eu_reverse_charge',reason:`Buitenlandse zakelijke dienst met landcode ${country}; verleggingsbehandeling toegepast als werkhypothese.`,confidence:'low',p:21};
+  }
   return null;
 }
-function classify(tx:RawTransaction):{x:FiscalClassification;reason:string;p?:number} {
+function classify(tx:RawTransaction):ClassificationHit {
   const hit=classifyFromText(tx); if(hit)return hit;
-  /* A bank export is sufficient input. In absence of an explicit exception,
-     use the Dutch general rate rather than blocking the calculation on an invoice. */
   return tx.type==='income'
-    ? {x:'domestic_output_21',reason:'Geen specifieke uitzondering gevonden; algemene Nederlandse btw-behandeling van 21% toegepast.'}
-    : {x:'domestic_input_21',reason:'Geen specifieke uitzondering gevonden; algemene Nederlandse btw-behandeling van 21% toegepast.'};
+    ? {x:'domestic_output_21',reason:'Geen specifieke uitzondering gevonden; algemene Nederlandse btw-behandeling van 21% toegepast als werkhypothese.',confidence:'low'}
+    : {x:'domestic_input_21',reason:'Geen specifieke uitzondering gevonden; algemene Nederlandse btw-behandeling van 21% toegepast als werkhypothese.',confidence:'low'};
 }
 function overrideClassification(tx:RawTransaction,o:BoekhouderBeoordeling){
   if(!o.beoordeeld_door?.trim())throw new Error(`BTW safety: beoordelaar ontbreekt voor ${tx.id}.`);
   const income=new Set<FiscalClassification>(['domestic_output_21','domestic_output_9','other_rate_output','private_use_adjustment','zero_rated_output','exempt_output','eu_output_0','non_eu_output_0']);
   const expense=new Set<FiscalClassification>(['domestic_input_21','domestic_input_9','non_deductible_input_21','non_deductible_input_9','horeca_bua_9','zero_rated_input','exempt_input','domestic_reverse_charge','eu_reverse_charge','non_eu_reverse_charge','private_no_vat']);
   if(!(tx.type==='income'?income:expense).has(o.classificatie))throw new Error(`BTW safety: classificatie ${o.classificatie} past niet bij ${tx.type}-transactie ${tx.id}.`);
-  if(o.classificatie==='other_rate_output'&&o.percentage!==13)throw new Error(`BTW safety: rubriek 1c vereist het expliciet vastgelegde 13%-forfait voor ${tx.id}.`);
+  if(o.classificatie==='other_rate_output'&&o.percentage!==13)throw new Error(`BTW safety: rubriek 1c vereist het expliciete 13%-forfait voor ${tx.id}.`);
   return o.classificatie;
 }
-function known(tx:RawTransaction,x:FiscalClassification,reason:string,manual:boolean,p?:number):FiscalTransaction{
+function known(tx:RawTransaction,x:FiscalClassification,reason:string,manual:boolean,p?:number,confidence:'high'|'low'='high'):FiscalTransaction{
   const rate=x==='other_rate_output'?(p??13):x==='domestic_output_21'||x==='domestic_input_21'||x==='non_deductible_input_21'||x==='private_use_adjustment'?21:x==='domestic_output_9'||x==='domestic_input_9'||x==='non_deductible_input_9'||x==='horeca_bua_9'?9:reverse(x)?(p===9?9:21):0;
   const gross=cents(Math.abs(tx.amount_incl)); const vat=rate===0?0:reverse(x)?Math.round(gross*rate/100):Math.round(gross*rate/(100+rate)); const base=reverse(x)?gross:gross-vat;
-  const ded=tx.type==='expense'&&deductible(x); const amountIncl=euros(gross); const amountExcl=euros(base); const vatAmount=euros(vat);
-  return {id:tx.id,date:tx.date,description:tx.description,type:tx.type,amount_incl_input:amountIncl,amount_excl:amountExcl,vat:{status:'known',rate,amount:vatAmount},classification:x,section:section(x),deductible:ded,evidenceRequired:false,evidenceStatus:manual?'human_confirmed':'not_required',confidence:'high',includedInTotals:true,reason,rule:rule(x),transactie_id:tx.id,omschrijving:tx.description??'',bedrag:amountIncl,btw:vatAmount,toegepaste_regel:rule(x).explanation};
+  const ded=tx.type==='expense'&&deductible(x); const amountIncl=euros(gross); const amountExcl=euros(base); const vatAmount=euros(vat); const appliedRule=rule(x);
+  return {id:tx.id,date:tx.date,description:tx.description,type:tx.type,amount_incl_input:amountIncl,amount_excl:amountExcl,vat:{status:'known',rate,amount:vatAmount},classification:x,section:section(x),deductible:ded,evidenceRequired:false,evidenceStatus:manual?'human_confirmed':'not_required',confidence,includedInTotals:true,reason,rule:appliedRule,transactie_id:tx.id,omschrijving:tx.description??'',bedrag:amountIncl,btw:vatAmount,toegepaste_regel:appliedRule.explanation};
 }
 function validate(rows:RawTransaction[]){const ids=new Set<string>();for(const t of rows){if(!t||typeof t.id!=='string'||!t.id.trim()||ids.has(t.id))throw new Error(`BTW safety: ongeldig of dubbel transactie-ID ${t?.id??''}.`);ids.add(t.id);if(t.type!=='income'&&t.type!=='expense')throw new Error(`BTW safety: ongeldige richting ${t.id}.`);cents(t.amount_incl);}}
 
 export function calculateFiscalVatReport(rows:RawTransaction[],overrides:Record<string,BoekhouderBeoordeling>={},adjustments:FiscalAdjustments={}):FiscalReport {
   if(!Array.isArray(rows))throw new Error('BTW safety: transacties moeten een array zijn.'); validate(rows);
+  for(const id of Object.keys(overrides))if(!rows.some(r=>r.id===id))throw new Error(`BTW safety: beoordeling verwijst naar onbekende transactie ${id}.`);
   const transactions:FiscalTransaction[]=[]; const ignored:FiscalReport['ignored']=[];
   for(const tx of rows){
     if(isSummary(tx)){ignored.push({id:tx.id,reason:'Samenvattingsregel genegeerd; alleen individuele transacties worden berekend.'});continue;}
     const review=overrides[tx.id];
-    if(review){transactions.push(known(tx,overrideClassification(tx,review),`Handmatig fiscaal bevestigd door ${review.beoordeeld_door}.`,true,review.percentage));continue;}
-    const a=classify(tx); transactions.push(known(tx,a.x,a.reason,false,a.p));
+    if(review){transactions.push(known(tx,overrideClassification(tx,review),`Handmatig fiscaal bevestigd door ${review.beoordeeld_door}.`,true,review.percentage,'high'));continue;}
+    const a=classify(tx); transactions.push(known(tx,a.x,a.reason,false,a.p,a.confidence));
   }
   const empty=()=>({grondslag:0,btw:0});
   const aangifte={'1a':empty(),'1b':empty(),'1c':empty(),'1d':empty(),'1e':empty(),'2a':empty(),'3a':empty(),'3b':empty(),'4a':empty(),'4b':empty(),'5a':0,'5b':0};
@@ -145,13 +152,13 @@ export function calculateFiscalVatReport(rows:RawTransaction[],overrides:Record<
   const inp=add(add(i21,i9),ri); const net=add(out,-inp); aangifte['5a']=out; aangifte['5b']=inp;
   const independentOut=transactions.filter(t=>t.includedInTotals&&t.vat.status==='known'&&(t.type==='income'||reverse(t.classification))).reduce((s,t)=>add(s,t.vat.status==='known'?t.vat.amount:0),add(m1c,m1d));
   const independentIn=transactions.filter(t=>t.includedInTotals&&t.type==='expense'&&t.deductible&&t.vat.status==='known').reduce((s,t)=>add(s,t.vat.status==='known'?t.vat.amount:0),0);
-  const unresolved=0;
+  const unresolved=transactions.filter(t=>t.vat.status==='unknown').length;
   const problems:string[]=[];
   if(independentOut!==out)problems.push('Onafhankelijke verschuldigde-btw controle faalt.');
   if(independentIn!==inp)problems.push('Onafhankelijke voorbelastingcontrole faalt.');
   if(add(independentOut,-independentIn)!==net)problems.push('Onafhankelijke nettocontrole faalt.');
-  return {transactions,overzicht:{output:{domestic21:o21,domestic9:o9,domesticOther:oo,domesticReverse:dr,euReverse:er,nonEuReverse:nr,privateUse:pu,total:out},input:{domestic21:i21,domestic9:i9,reverseCharge:ri,total:inp},nonDeductible:nd,netto:net,status:net>=0?'af_te_dragen':'terug_te_vorderen'},aangifte,audit:{ok:problems.length===0,problems,input:rows.length,known:transactions.length,unresolved,evidenceRequired:0,ignored:ignored.length,included:transactions.length},ignored};
+  return {transactions,overzicht:{output:{domestic21:o21,domestic9:o9,domesticOther:oo,domesticReverse:dr,euReverse:er,nonEuReverse:nr,privateUse:pu,total:out},input:{domestic21:i21,domestic9:i9,reverseCharge:ri,total:inp},nonDeductible:nd,netto:net,status:net>=0?'af_te_drager':'terug_te_vorderen'},aangifte,audit:{ok:problems.length===0,problems,input:rows.length,known:transactions.length,unresolved,evidenceRequired:0,ignored:ignored.length,included:transactions.length},ignored};
 }
 
 export function berekenBetrouwbaarheidsscore(r:FiscalReport){if(r.audit.input===0)return 100;return Math.max(0,Math.min(100,Number((100-r.audit.unresolved/r.audit.input*20-(r.audit.ok?0:50)).toFixed(2))));}
-export function tweeKolommenWeergave(r:FiscalReport){return{zeker:r.transactions.filter(t=>t.includedInTotals),twijfelgevallen:r.transactions.filter(t=>!t.includedInTotals)}}
+export function tweeKolommenWeergave(r:FiscalReport){return{zeker:r.transactions.filter(t=>t.includedInTotals&&t.confidence==='high'),twijfelgevallen:r.transactions.filter(t=>t.includedInTotals&&t.confidence==='low')}}
