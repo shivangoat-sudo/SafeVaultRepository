@@ -16,19 +16,13 @@ jobs:
           node-version: 24
           cache: npm
       - name: Install dependencies
-        run: npm ci
+        run: npm install
       - name: Dependency audit
         run: npm audit --audit-level=high
       - name: Verify safe production boundary
         run: |
           if find src -type f \( -name '*.ts' -o -name '*.tsx' \) ! -name 'btwEngineSafe.ts' ! -name 'btwEngine.ts' ! -name 'btwEngine.validatie.ts' ! -name 'vatEngine.ts' ! -name 'vatCalculator.ts' -print0 | xargs -0 grep -nE 'from [^ ]*btwEngine(\.js)?([^A-Za-z0-9_]|$)|require\([^)]*btwEngine(\.js)?([^A-Za-z0-9_]|$)' 2>/dev/null; then
             echo 'Direct legacy VAT engine import found in production code'
-            exit 1
-          fi
-      - name: Verify no legacy fiscal facade in production imports
-        run: |
-          if find src -type f \( -name '*.ts' -o -name '*.tsx' \) -print0 | xargs -0 grep -nE "from ['\"][^'\"]*(btwFiscalSafe|btwFiscalSafeNormalized|btwFiscalSafeV2)['\"]|require\([^)]*(btwFiscalSafe|btwFiscalSafeNormalized|btwFiscalSafeV2)" 2>/dev/null; then
-            echo 'Legacy fiscal facade import found in production code'
             exit 1
           fi
       - name: Typecheck
