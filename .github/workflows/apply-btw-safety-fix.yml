@@ -1,0 +1,41 @@
+name: BTW safety CI
+on:
+  push:
+    branches: [fix/btw-structural-safety]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  harden-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install and reconcile dependencies
+        run: npm install --legacy-peer-deps --ignore-scripts
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+      - name: Verify safe production boundary
+        run: |
+          if find src -type f \( -name '*.ts' -o -name '*.tsx' \) ! -name 'btwEngineSafe.ts' ! -name 'btwEngine.ts' ! -name 'btwEngine.validatie.ts' ! -name 'vatEngine.ts' ! -name 'vatCalculator.ts' -print0 | xargs -0 grep -nE 'from [^ ]*(btwEngine|vatEngine)(\.js)?([^A-Za-z0-9_]|$)|require\([^)]*(btwEngine|vatEngine)(\.js)?([^A-Za-z0-9_]|$)' 2>/dev/null; then
+            echo 'Direct legacy VAT engine import found in production code'
+            exit 1
+          fi
+      - name: Verify no legacy fiscal facade in production imports
+        run: |
+          if find src -type f \( -name '*.ts' -o -name '*.tsx' \) ! -name 'btwFiscalSafe.ts' ! -name 'btwFiscalSafeV2.ts' ! -name 'btwFiscalSafeV3.ts' ! -name 'btwFiscalSafeFinal.ts' ! -name 'btwFiscalSafeFinalV2.ts' ! -name 'btwFiscalSafeNormalized.ts' -print0 | xargs -0 grep -nE "from ['\"][^'\"]*btwFiscalSafe(\.js|V2\.js|V3\.js|Final\.js|FinalV2\.js|Normalized\.js)?['\"]|require\([^)]*btwFiscalSafe" 2>/dev/null; then
+            echo 'Legacy fiscal facade import found in production code'
+            exit 1
+          fi
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Safety tests
+        run: npm run test:btw-safety
+      - name: Existing tests
+        run: npm test
+      - name: Build
+        run: npm run build

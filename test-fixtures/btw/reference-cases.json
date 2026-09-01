@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "currency": "EUR",
+  "cases": [
+    {"id":"domestic-sale-21","input":{"amount":121,"basis":"gross","rate":21},"expected":{"base":100,"vat":21}},
+    {"id":"domestic-sale-9","input":{"amount":109,"basis":"gross","rate":9},"expected":{"base":100,"vat":9}},
+    {"id":"domestic-purchase-21","input":{"amount":121,"basis":"gross","rate":21},"expected":{"base":100,"vat":21}},
+    {"id":"domestic-purchase-9","input":{"amount":109,"basis":"gross","rate":9},"expected":{"base":100,"vat":9}},
+    {"id":"eu-reverse-charge-service","input":{"amount":100,"basis":"net","rate":21},"expected":{"base":100,"vat":21,"outputSection":"4b","inputEligible":true}},
+    {"id":"non-eu-reverse-charge-service","input":{"amount":100,"basis":"net","rate":21},"expected":{"base":100,"vat":21,"outputSection":"4a","inputEligible":true}},
+    {"id":"zero-rated","input":{"amount":100,"basis":"gross","rate":0},"expected":{"base":100,"vat":0,"classification":"zero_rated"}},
+    {"id":"exempt","input":{"amount":100,"basis":"gross","rate":0},"expected":{"base":100,"vat":0,"classification":"exempt"}}
+  ]
+}
