@@ -1,4 +1,4 @@
-import type { BoekhouderBeoordeling } from './btwFiscalSafeFinalV2';
+import type { BoekhouderBeoordeling } from './btwFiscalSafeCore';
 
 export const FISCAL_CLASSIFICATION_OPTIONS: Array<{value: BoekhouderBeoordeling['classificatie'];label:string;sections:string}> = [
  {value:'domestic_output_21',label:'Omzet binnenland — 21%',sections:'1a'},
