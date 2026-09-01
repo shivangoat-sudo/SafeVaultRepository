@@ -1,2 +1,2 @@
 // Compatibility facade. Final evidence-gated implementation.
-export * from './btwFiscalSafeFinal';
+export * from './btwFiscalSafeFinalV2';
