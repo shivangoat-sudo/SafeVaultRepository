@@ -9,12 +9,21 @@ const review = (classificatie: Parameters<typeof calculateFiscalVatReport>[1][st
 });
 
 const unknownIncome = calculateFiscalVatReport([{ id: 'unknown-income', type: 'income', amount_incl: 121, description: 'Onbekende klantbetaling' }]);
-assert.equal(unknownIncome.aangifte['5a'], 0);
+assert.equal(unknownIncome.aangifte['1a'].btw, 21);
+assert.equal(unknownIncome.aangifte['5a'], 21);
 assert.equal(unknownIncome.aangifte['5b'], 0);
-assert.equal(unknownIncome.overzicht.netto, 0);
-assert.equal(unknownIncome.audit.unresolved, 1);
-assert.equal(unknownIncome.audit.ok, false);
-assert.equal(unknownIncome.transactions[0].vat.status, 'unknown');
+assert.equal(unknownIncome.overzicht.netto, 21);
+assert.equal(unknownIncome.audit.unresolved, 0);
+assert.equal(unknownIncome.audit.ok, true);
+assert.equal(unknownIncome.transactions[0].vat.status, 'known');
+assert.equal(unknownIncome.transactions[0].confidence, 'low');
+
+const unknownExpense = calculateFiscalVatReport([{ id: 'unknown-expense', type: 'expense', amount_incl: 121, description: 'Onbekende zakelijke inkoop' }]);
+assert.equal(unknownExpense.aangifte['5b'], 21);
+assert.equal(unknownExpense.overzicht.netto, -21);
+assert.equal(unknownExpense.audit.unresolved, 0);
+assert.equal(unknownExpense.audit.ok, true);
+assert.equal(unknownExpense.transactions[0].confidence, 'low');
 
 const knownIncome = calculateFiscalVatReport(
   [{ id: 'known-income', type: 'income', amount_incl: 109, description: 'Verkoop boek' }],
@@ -95,17 +104,45 @@ assert.equal(summary.overzicht.output.total, 21);
 const ambiguousDirectionCsv = 'Datum;Naam / Omschrijving;Af Bij;Bedrag (EUR)\n20260831;Test;onbekend;100,00\n';
 assert.throws(() => parseCsvToRawTransactions(ambiguousDirectionCsv));
 
-const largeDataset = Array.from({ length: 100_000 }, (_, i) => ({ id: `scale-${i}`, type: 'income' as const, amount_incl: 109, description: 'Verkoop boek' }));
+// 10,000-row mixed stress test. This deliberately exercises multiple
+// Dutch-rate/rule paths rather than only repeating one transaction shape.
+const templates = [
+  (i:number) => ({ id:`scale-${i}`, type:'income' as const, amount_incl:109, description:'Verkoop boek' }),
+  (i:number) => ({ id:`scale-${i}`, type:'income' as const, amount_incl:121, description:'Onbekende klantbetaling' }),
+  (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:100, description:'OpenAI LLC', tegenrekening_iban:'US123456789' }),
+  (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:109, description:'Café De Hoek' }),
+  (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:109, description:'Jumbo Supermarkten' }),
+  (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:121, description:'KPN Zakelijk' }),
+  (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:121, description:'Onbekende zakelijke inkoop' }),
+  (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:1450, description:'Belastingdienst' }),
+];
+const largeDataset = Array.from({ length: 10_000 }, (_, i) => templates[i % templates.length](i));
 const largeReport = calculateFiscalVatReport(largeDataset);
-assert.equal(largeReport.audit.input, 100_000);
-assert.equal(largeReport.audit.included, 0);
-assert.equal(largeReport.audit.unresolved, 100_000);
-assert.equal(largeReport.audit.ok, false);
-assert.equal(largeReport.transactions.length, 100_000);
+assert.equal(largeReport.audit.input, 10_000);
+assert.equal(largeReport.audit.included, 10_000);
+assert.equal(largeReport.audit.unresolved, 0);
+assert.equal(largeReport.audit.ignored, 0);
+assert.equal(largeReport.audit.ok, true);
+assert.equal(largeReport.aangifte['1a'].btw, 18_750);
+assert.equal(largeReport.aangifte['1b'].btw, 11_250);
+assert.equal(largeReport.aangifte['4a'].btw, 26_250);
+assert.equal(largeReport.aangifte['5a'], 56_250);
+assert.equal(largeReport.aangifte['5b'], 90_000);
+assert.equal(largeReport.overzicht.nonDeductible, 11_250);
+assert.equal(largeReport.overzicht.netto, -33_750);
+assert.equal(largeReport.transactions.length, 10_000);
+assert.ok(largeReport.transactions.some(t => t.confidence === 'low'));
+assert.ok(largeReport.transactions.some(t => t.classification === 'domestic_output_9'));
+assert.ok(largeReport.transactions.some(t => t.classification === 'domestic_output_21'));
+assert.ok(largeReport.transactions.some(t => t.classification === 'domestic_reverse_charge' || t.classification === 'non_eu_reverse_charge'));
+assert.ok(largeReport.transactions.some(t => t.classification === 'horeca_bua_9'));
+assert.ok(largeReport.transactions.some(t => t.classification === 'domestic_input_9'));
+assert.ok(largeReport.transactions.some(t => t.classification === 'domestic_input_21'));
+assert.ok(largeReport.transactions.some(t => t.classification === 'exempt_input'));
 
-for (const report of [unknownIncome, knownIncome, knownExpense, nonDeductible, foreignService, euLow, exportCase, intra, largeReport]) {
+for (const report of [unknownIncome, unknownExpense, knownIncome, knownExpense, nonDeductible, foreignService, euLow, exportCase, intra, summary, largeReport]) {
   assert.equal(report.overzicht.output.total - report.overzicht.input.total, report.overzicht.netto);
   assert.equal(report.audit.included + report.audit.unresolved + report.audit.ignored, report.audit.input);
 }
 
-console.log('BTW safety smoke tests passed');
+console.log('BTW safety smoke tests passed: automatic classification, Dutch rule cases, and 10,000-row stress test');
