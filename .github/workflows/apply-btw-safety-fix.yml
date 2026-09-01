@@ -6,6 +6,7 @@ on:
     branches: [main]
 permissions:
   contents: read
+  issues: write
 jobs:
   harden-and-verify:
     runs-on: ubuntu-latest
@@ -32,7 +33,16 @@ jobs:
             exit 1
           fi
       - name: Typecheck
-        run: npm run typecheck
+        id: typecheck
+        continue-on-error: true
+        run: npm run typecheck 2>&1 | tee typecheck.log; exit ${PIPESTATUS[0]}
+      - name: Publish typecheck diagnostics
+        if: steps.typecheck.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create --repo "${{ github.repository }}" --title "CI diagnostic: TypeScript typecheck ${{ github.sha }}" --body-file typecheck.log
+          exit 1
       - name: Safety tests
         run: npm run test:btw-safety
       - name: Existing tests
