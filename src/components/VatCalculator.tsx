@@ -4,7 +4,7 @@ import { useToast } from "@/components/Toast";
 import { EmptyState, Spinner } from "@/components/ui";
 import { parseCsvToRawTransactions } from "@/utils/vatCsvParser";
 import { calculateFiscalVatReport, tweeKolommenWeergave, berekenBetrouwbaarheidsscore, BOEKHOUDER_PERCENTAGE_OPTIES, type FiscalReport, type BtwPercentage, type BoekhouderBeoordeling } from "@/lib/btwFiscalSafeNormalized";
-import type { RawTransaction } from "@/lib/btwEngineSafe";
+import type { RawTransaction } from "@/lib/btwSafeTypes";
 import { Calculator, AlertTriangle, CheckCircle2, TrendingDown, TrendingUp, ArrowDownUp, FileSpreadsheet, UserCheck } from "lucide-react";
 import type { FileRow } from "@/types";
 
@@ -28,11 +28,7 @@ export function VatCalculator({ customerId }: { customerId: string }) {
   useEffect(() => { loadFiles(); }, [loadFiles]);
   const matchingFiles = useMemo(() => files.filter(f => f.category === "income_overview" && (!f.quarter || String(f.quarter).toUpperCase() === quarter) && (!f.year || f.year === year) && (/\.(csv|txt)$/i.test(f.original_name))), [files, quarter, year]);
 
-  const runCalculation = async (file: File, nextOverrides = overrides) => {
-    setCalculating(true);
-    try { const rows = parseCsvToRawTransactions(await file.text()); if (!rows.length) throw new Error("Geen transacties uit het CSV-bestand kunnen worden gelezen."); setRawTransactions(rows); setReport(calculateFiscalVatReport(rows, nextOverrides)); }
-    catch (e) { push("error", e instanceof Error ? e.message : "BTW-berekening mislukt."); } finally { setCalculating(false); }
-  };
+  const runCalculation = async (file: File, nextOverrides = overrides) => { setCalculating(true); try { const rows = parseCsvToRawTransactions(await file.text()); if (!rows.length) throw new Error("Geen transacties uit het CSV-bestand kunnen worden gelezen."); setRawTransactions(rows); setReport(calculateFiscalVatReport(rows, nextOverrides)); } catch (e) { push("error", e instanceof Error ? e.message : "BTW-berekening mislukt."); } finally { setCalculating(false); } };
   const selectAndCalculate = async () => { if (!matchingFiles.length) { push("error", `Geen bestand gevonden voor ${quarter} ${year}.`); return; } try { const f=matchingFiles[0]; const view=await api.userFileView(f.id); const response=await fetch(view.url); if(!response.ok) throw new Error("Bestand kon niet worden opgehaald."); await runCalculation(new File([await response.blob()], f.original_name, { type:f.mime_type || "text/csv" })); } catch(e) { push("error", e instanceof Error ? e.message : "Bestand kon niet worden opgehaald."); } };
   const applyReview = (id: string, percentage: BtwPercentage) => { const name=reviewer.trim(); if(!name){push("error","Vul eerst de naam van de boekhouder in.");return;} const next={...overrides,[id]:{percentage,beoordeeld_door:name}}; setOverrides(next); if(report) setReport(calculateFiscalVatReport(rawTransactions,next)); };
   const columns = report ? tweeKolommenWeergave(report) : { zeker: [], twijfelgevallen: [] };
