@@ -1,52 +1,61 @@
 import Papa from 'papaparse';
 import { genereerStabielTransactieId, type RawTransaction } from '../lib/btwSafeTypes';
 
-/** Parse bank CSV structure only; no fiscal classification occurs here. */
 export function parseCsvToRawTransactions(csvContent: string): RawTransaction[] {
+  if (typeof csvContent !== 'string') throw new Error('CSV kan niet veilig worden gelezen: ongeldige invoer.');
   const str = csvContent.replace(/^\uFEFF/, '').trim();
   if (!str) return [];
-  const delimiter = detectDelimiter(str.slice(0, str.indexOf('\n') === -1 ? str.length : str.indexOf('\n')));
-  const parseResult = Papa.parse<string[]>(str, { delimiter, header: false, skipEmptyLines: 'greedy', dynamicTyping: false });
-  if (parseResult.errors.length > 0) throw new Error(`CSV kon niet veilig worden gelezen: ${parseResult.errors[0].message}`);
-  const rows = parseResult.data;
-  if (!rows || rows.length <= 1) return [];
-
-  const headers = rows[0].map((h) => String(h ?? '').trim().toLowerCase());
-  const findIdx = (keywords: string[]) => { for (const kw of keywords) { const idx = headers.findIndex((h) => h.includes(kw)); if (idx !== -1) return idx; } return -1; };
-  const datumIdx = findIdx(['datum', 'date']);
-  const omschrijvingIdx = findIdx(['naam / omschrijving', 'omschrijving', 'naam', 'description', 'counterparty']);
-  const tegenrekeningIdx = findIdx(['tegenrekening', 'iban']);
-  const afBijIdx = findIdx(['af bij', 'af/bij', 'type', 'direction']);
-  const bedragIdx = findIdx(['bedrag', 'amount']);
-  const mededelingenIdx = findIdx(['mededelingen', 'memo', 'opmerking', 'notes']);
-  if (bedragIdx === -1) throw new Error('CSV bevat geen herkenbare bedragkolom.');
-  if (afBijIdx === -1) throw new Error('CSV bevat geen herkenbare richtingkolom (Af Bij/type/direction).');
-
-  const rawTxList: RawTransaction[] = [];
-  const seenIds = new Map<string, number>();
-  for (let i = 1; i < rows.length; i++) {
-    const row = rows[i]; if (!row || row.length === 0) continue;
-    const rawDatum = datumIdx !== -1 ? String(row[datumIdx] ?? '').trim() : '';
-    const rawDescription = omschrijvingIdx !== -1 ? String(row[omschrijvingIdx] ?? '').trim() : '';
-    const rawTegenrekening = tegenrekeningIdx !== -1 ? String(row[tegenrekeningIdx] ?? '').trim() : '';
-    const rawAfBij = String(row[afBijIdx] ?? '').trim().toLowerCase();
-    const rawBedrag = String(row[bedragIdx] ?? '').trim();
-    const rawMemo = mededelingenIdx !== -1 ? String(row[mededelingenIdx] ?? '').trim() : '';
-    if (!rawBedrag) continue;
-    const parsedAmount = parseDutchAmount(rawBedrag);
-    if (parsedAmount === null) throw new Error(`Ongeldig bedrag op CSV-regel ${i + 1}: ${rawBedrag}`);
-    if (parsedAmount === 0) continue;
-    const isIncome = ['bij', 'income', 'inkomsten', 'c', 'cr'].includes(rawAfBij);
-    const isExpense = ['af', 'expense', 'uitgaven', 'd', 'dr'].includes(rawAfBij);
-    if (!isIncome && !isExpense) throw new Error(`Onbekende transactierichting op CSV-regel ${i + 1}: ${rawAfBij || '(leeg)'}`);
-    const amount = Math.abs(parsedAmount);
-    const baseId = genereerStabielTransactieId({ date: rawDatum, description: rawDescription || 'Transactie', amount_incl: amount, tegenrekening_iban: rawTegenrekening || undefined });
-    const occurrence = (seenIds.get(baseId) ?? 0) + 1; seenIds.set(baseId, occurrence);
-    const stableId = occurrence === 1 ? baseId : `${baseId}_${occurrence}`;
-    rawTxList.push({ id: stableId, date: rawDatum || undefined, description: rawDescription || 'Transactie', amount_incl: amount, type: isIncome ? 'income' : 'expense', memo: rawMemo || undefined, tegenrekening_iban: rawTegenrekening || undefined });
+  const firstLineEnd = str.indexOf('\n');
+  const headerLine = firstLineEnd === -1 ? str : str.slice(0, firstLineEnd);
+  const delimiter = detectDelimiter(headerLine);
+  const result = Papa.parse<string[]>(str, { delimiter, header: false, skipEmptyLines: 'greedy', dynamicTyping: false });
+  if (result.errors.length) throw new Error(`CSV kon niet veilig worden gelezen: ${result.errors[0].message}`);
+  const rows = result.data;
+  if (rows.length <= 1) return [];
+  const headers = rows[0].map(h => String(h ?? '').replace(/^\uFEFF/, '').trim().toLowerCase());
+  const findIdx = (keywords: string[]) => keywords.map(k => headers.findIndex(h => h === k || h.includes(k))).find(i => i !== -1) ?? -1;
+  const datumIdx=findIdx(['datum','date']);
+  const descriptionIdx=findIdx(['naam / omschrijving','omschrijving','description','counterparty','naam']);
+  const counterpartyIdx=findIdx(['tegenrekening','iban']);
+  const directionIdx=findIdx(['af bij','af/bij','direction','type']);
+  const amountIdx=findIdx(['bedrag','amount']);
+  const memoIdx=findIdx(['mededelingen','memo','opmerking','notes']);
+  if(amountIdx===-1) throw new Error('CSV bevat geen herkenbare bedragkolom.');
+  if(directionIdx===-1) throw new Error('CSV bevat geen herkenbare richtingkolom (Af Bij/type/direction).');
+  const output: RawTransaction[]=[]; const seen=new Map<string,number>();
+  for(let i=1;i<rows.length;i++){
+    const row=rows[i]; if(!row?.length) continue;
+    const date=datumIdx>=0?String(row[datumIdx]??'').trim():'';
+    const description=descriptionIdx>=0?String(row[descriptionIdx]??'').trim():'Transactie';
+    const iban=counterpartyIdx>=0?String(row[counterpartyIdx]??'').trim():'';
+    const direction=String(row[directionIdx]??'').trim().toLowerCase();
+    const rawAmount=String(row[amountIdx]??'').trim();
+    const memo=memoIdx>=0?String(row[memoIdx]??'').trim():'';
+    if(!rawAmount) continue;
+    const parsed=parseDutchAmount(rawAmount);
+    if(parsed===null) throw new Error(`Ongeldig bedrag op CSV-regel ${i+1}: ${rawAmount}`);
+    if(parsed===0) continue;
+    const income=['bij','income','inkomsten','credit','cr','c'].includes(direction);
+    const expense=['af','expense','uitgaven','debit','dr','d'].includes(direction);
+    if(!income&&!expense) throw new Error(`Onbekende transactierichting op CSV-regel ${i+1}: ${direction||'(leeg)'}`);
+    const amount=Math.abs(parsed);
+    const base=genereerStabielTransactieId({date,description:description||'Transactie',amount_incl:amount,tegenrekening_iban:iban||undefined});
+    const occurrence=(seen.get(base)??0)+1; seen.set(base,occurrence);
+    output.push({id:occurrence===1?base:`${base}_${occurrence}`,date:date||undefined,description:description||'Transactie',memo:memo||undefined,amount_incl:amount,type:income?'income':'expense',tegenrekening_iban:iban||undefined});
   }
-  return rawTxList;
+  return output;
 }
 
-function detectDelimiter(headerLine: string): ',' | ';' { let inQuotes=false, semicolons=0, commas=0; for(let i=0;i<headerLine.length;i++){const ch=headerLine[i]; if(ch==='"'){if(inQuotes&&headerLine[i+1]==='"'){i++;continue;}inQuotes=!inQuotes;}else if(!inQuotes&&ch===';')semicolons++;else if(!inQuotes&&ch===',')commas++;}return semicolons>commas?';':','; }
-function parseDutchAmount(input: string): number | null { let value=input.replace(/[€\s]/g,'').trim(); if(!value)return null; const negative=value.startsWith('-')||(value.startsWith('(')&&value.endsWith(')')); value=value.replace(/^[+-]/,'').replace(/^\(/,'').replace(/\)$/,''); if(!value||!/^\d[\d.,]*$/.test(value))return null; const comma=value.lastIndexOf(','),dot=value.lastIndexOf('.'); if(comma!==-1&&dot!==-1){const decimal=comma>dot?',':'.';const thousands=decimal===','?'.':',';value=value.split(thousands).join('').replace(decimal,'.');}else if(comma!==-1){const decimals=value.length-comma-1;value=decimals>=1&&decimals<=2?value.replace(',','.'):value.replace(/,/g,'');}else if(dot!==-1){const decimals=value.length-dot-1;value=decimals>=1&&decimals<=2?value:value.replace(/\./g,'');}const parsed=Number(value);if(!Number.isFinite(parsed))return null;return negative?-parsed:parsed;}
+function detectDelimiter(line:string):','|';'{let quoted=false,commas=0,semicolons=0;for(let i=0;i<line.length;i++){const ch=line[i];if(ch==='"'){if(quoted&&line[i+1]==='"'){i++;continue;}quoted=!quoted;}else if(!quoted&&ch===',')commas++;else if(!quoted&&ch===';')semicolons++;}return semicolons>commas?';':',';}
+
+/** Conservative locale parser: ambiguous 3-decimal separators are treated as Dutch thousands separators. */
+export function parseDutchAmount(input:string):number|null{
+ let v=input.replace(/[€\s\u00A0]/g,'').trim(); if(!v)return null;
+ let negative=false; if(v.startsWith('(')&&v.endsWith(')')){negative=true;v=v.slice(1,-1);}else if(v.startsWith('-')){negative=true;v=v.slice(1);}else if(v.startsWith('+'))v=v.slice(1);
+ if(!v||!/^[0-9][0-9.,]*$/.test(v))return null;
+ const comma=v.lastIndexOf(','),dot=v.lastIndexOf('.');
+ if(comma>=0&&dot>=0){const decimal=comma>dot?',':'.';const thousands=decimal===','?'.':',';v=v.split(thousands).join('').replace(decimal,'.');}
+ else if(comma>=0){const digits=v.length-comma-1;v=digits>=1&&digits<=2?v.replace(',','.'):v.replace(/,/g,'');}
+ else if(dot>=0){const digits=v.length-dot-1;v=digits===3?v.replace(/\./g,''):digits>=1&&digits<=2?v:v.replace(/\./g,'');}
+ const n=Number(v); if(!Number.isFinite(n))return null; return negative?-n:n;
+}
