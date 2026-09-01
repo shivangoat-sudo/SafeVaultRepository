@@ -114,7 +114,7 @@ const templates = [
   (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:109, description:'Jumbo Supermarkten' }),
   (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:121, description:'KPN Zakelijk' }),
   (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:121, description:'Onbekende zakelijke inkoop' }),
-  (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:1450, description:'Belastingdienst' }),
+  (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:1450, description:'Bankkosten' }),
 ];
 const largeDataset = Array.from({ length: 10_000 }, (_, i) => templates[i % templates.length](i));
 const largeReport = calculateFiscalVatReport(largeDataset);
@@ -126,10 +126,10 @@ assert.equal(largeReport.audit.ok, true);
 assert.equal(largeReport.aangifte['1a'].btw, 18_750);
 assert.equal(largeReport.aangifte['1b'].btw, 11_250);
 assert.equal(largeReport.aangifte['4a'].btw, 26_250);
-assert.equal(largeReport.aangifte['5a'], 63_750);
-assert.equal(largeReport.aangifte['5b'], 90_000);
+assert.equal(largeReport.aangifte['5a'], 56_250);
+assert.equal(largeReport.aangifte['5b'], 63_750);
 assert.equal(largeReport.overzicht.nonDeductible, 11_250);
-assert.equal(largeReport.overzicht.netto, -26_250);
+assert.equal(largeReport.overzicht.netto, -7_500);
 assert.equal(largeReport.transactions.length, 10_000);
 assert.ok(largeReport.transactions.some(t => t.confidence === 'low'));
 assert.ok(largeReport.transactions.some(t => t.classification === 'domestic_output_9'));
