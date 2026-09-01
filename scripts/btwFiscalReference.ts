@@ -25,7 +25,8 @@ assert.equal(r.aangifte['1b'].btw, 9);
 assert.equal(r.aangifte['2a'].btw, 21);
 assert.equal(r.aangifte['4b'].btw, 21);
 assert.equal(r.aangifte['4a'].btw, 21);
-assert.equal(r.aangifte['5b'], 21 + 9);
+// Reverse-charge VAT is reported as output VAT and, where deductible, also as input VAT.
+assert.equal(r.aangifte['5b'], 63);
 assert.equal(r.overzicht.nonDeductible, 9);
 assert.equal(r.ignored.length, 1);
 assert.equal(r.audit.input, 11);
