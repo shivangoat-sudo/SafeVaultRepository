@@ -107,7 +107,7 @@ assert.throws(() => parseCsvToRawTransactions(ambiguousDirectionCsv));
 // 10,000-row mixed stress test. This deliberately exercises multiple
 // Dutch-rate/rule paths rather than only repeating one transaction shape.
 const templates = [
-  (i:number) => ({ id:`scale-${i}`, type:'income' as const, amount_incl:109, description:'Verkoop boek' }),
+  (i:number) => ({ id:`scale-${i}`, type:'income' as const, amount_incl:109, description:'Verkoop boek 9%' }),
   (i:number) => ({ id:`scale-${i}`, type:'income' as const, amount_incl:121, description:'Onbekende klantbetaling' }),
   (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:100, description:'OpenAI LLC', tegenrekening_iban:'US123456789' }),
   (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:109, description:'Café De Hoek' }),
