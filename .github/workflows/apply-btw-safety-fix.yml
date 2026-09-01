@@ -6,7 +6,6 @@ on:
     branches: [main]
 permissions:
   contents: read
-  issues: write
 jobs:
   harden-and-verify:
     runs-on: ubuntu-latest
@@ -34,27 +33,9 @@ jobs:
           fi
       - name: Typecheck
         run: npm run typecheck
-      - name: Safety tests diagnostics
-        id: safety
-        continue-on-error: true
-        run: npm run test:btw-safety 2>&1 | tee safety.log; exit ${PIPESTATUS[0]}
-      - name: Publish safety diagnostics
-        if: steps.safety.outcome == 'failure'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh issue create --repo "${{ github.repository }}" --title "CI diagnostic: BTW safety tests ${{ github.sha }}" --body-file safety.log
-          exit 1
+      - name: Safety tests
+        run: npm run test:btw-safety
       - name: Existing tests
         run: npm test
-      - name: Build diagnostics
-        id: build
-        continue-on-error: true
-        run: npm run build 2>&1 | tee build.log; exit ${PIPESTATUS[0]}
-      - name: Publish build diagnostics
-        if: steps.build.outcome == 'failure'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh issue create --repo "${{ github.repository }}" --title "CI diagnostic: build ${{ github.sha }}" --body-file build.log
-          exit 1
+      - name: Build
+        run: npm run build
