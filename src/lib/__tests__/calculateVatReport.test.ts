@@ -1,4 +1,4 @@
-import { calculateFiscalVatReport, type BoekhouderBeoordeling } from '../btwFiscalSafeCore';
+import { calculateFiscalVatReport, type BoekhouderBeoordeling } from '../btwFiscalSafePolicy';
 import type { RawTransaction } from '../btwSafeTypes';
 
 const review = (classificatie: BoekhouderBeoordeling['classificatie'], percentage?: number): BoekhouderBeoordeling => ({
@@ -45,7 +45,23 @@ assert(unresolved.aangifte['5a'] === 0 && unresolved.aangifte['5b'] === 0, 'Onbe
 assert(unresolved.audit.unresolved === rows.length, 'Alle onbeoordeelde transacties moeten unresolved zijn.');
 assert(unresolved.audit.ok === false, 'Een rapport met unresolved transacties mag niet audit-ok zijn.');
 
+const oneC = calculateFiscalVatReport(
+  [{ id: 'sports', amount_incl: 113, type: 'income', description: 'Sportkantine forfait' }],
+  { sports: review('other_rate_output', 13) },
+);
+assert(oneC.aangifte['1c'].btw === 13, `1c 13%-forfait moet €13 zijn, kreeg ${oneC.aangifte['1c'].btw}`);
 let threw = false;
+try {
+  calculateFiscalVatReport(
+    [{ id: 'bad-1c', amount_incl: 105, type: 'income', description: 'Onbekend overig tarief' }],
+    { 'bad-1c': review('other_rate_output', 5) },
+  );
+} catch {
+  threw = true;
+}
+assert(threw, 'Een willekeurig 1c-tarief moet worden geweigerd.');
+
+threw = false;
 try {
   calculateFiscalVatReport([{ id: 'bad', amount_incl: 121, type: 'expense' }], {
     bad: review('domestic_output_21'),
@@ -66,4 +82,4 @@ try {
 }
 assert(threw, 'Dubbele transactie-ID moet worden geweigerd.');
 
-console.log('OK: veilige fiscale rapportage, verlegging 9/21%, fail-closed classificatie en reconciliatie.');
+console.log('OK: veilige fiscale rapportage, Nederlandse 1c-policy, verlegging 9/21%, fail-closed classificatie en reconciliatie.');
