@@ -47,5 +47,14 @@ jobs:
           exit 1
       - name: Existing tests
         run: npm test
-      - name: Build
-        run: npm run build
+      - name: Build diagnostics
+        id: build
+        continue-on-error: true
+        run: npm run build 2>&1 | tee build.log; exit ${PIPESTATUS[0]}
+      - name: Publish build diagnostics
+        if: steps.build.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create --repo "${{ github.repository }}" --title "CI diagnostic: build ${{ github.sha }}" --body-file build.log
+          exit 1
