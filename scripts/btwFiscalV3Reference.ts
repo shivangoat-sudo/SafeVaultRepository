@@ -26,35 +26,37 @@ assert.equal(confirmed.aangifte['1a'].grondslag, 100);
 assert.equal(confirmed.aangifte['5b'], 21);
 assert.equal(confirmed.audit.ok, true);
 
-const reverse = calculateFiscalVatReport([
-  { id:'eu', type:'expense', amount_incl:100, description:'EU software btw verlegd', tegenrekening_iban:'IE00TEST' },
-], { eu:{ classificatie:'eu_reverse_charge', beoordeeld_door:'Boekhouder' } });
-assert.equal(reverse.aangifte['4b'].grondslag, 100);
-assert.equal(reverse.aangifte['4b'].btw, 21);
-assert.equal(reverse.aangifte['5b'], 21);
-assert.equal(reverse.overzicht.netto, 0);
+const low = calculateFiscalVatReport([{id:'low',type:'income',amount_incl:109,description:'Verkoop 9%'}], {low:{percentage:9,beoordeeld_door:'Boekhouder'}});
+assert.equal(low.aangifte['1b'].grondslag,100); assert.equal(low.aangifte['1b'].btw,9);
 
-const exportCase = calculateFiscalVatReport([
-  { id:'export', type:'income', amount_incl:100, description:'Export buiten EU' },
-], { export:{ classificatie:'non_eu_output_0', beoordeeld_door:'Boekhouder' } });
-assert.equal(exportCase.aangifte['3a'].grondslag, 100);
-assert.equal(exportCase.overzicht.output.total, 0);
+const zero = calculateFiscalVatReport([{id:'zero',type:'income',amount_incl:100,description:'0% levering'}], {zero:{percentage:0,beoordeeld_door:'Boekhouder'}});
+assert.equal(zero.aangifte['1e'].grondslag,100); assert.equal(zero.overzicht.output.total,0);
 
-const duplicate = [{ id:'same', type:'income' as const, amount_incl:100, description:'A' }, { id:'same', type:'income' as const, amount_incl:100, description:'B' }];
+const reverse = calculateFiscalVatReport([{id:'eu',type:'expense',amount_incl:100,description:'EU software btw verlegd',tegenrekening_iban:'IE00TEST'}], {eu:{classificatie:'eu_reverse_charge',beoordeeld_door:'Boekhouder'}});
+assert.equal(reverse.aangifte['4b'].grondslag,100); assert.equal(reverse.aangifte['4b'].btw,21); assert.equal(reverse.aangifte['5b'],21); assert.equal(reverse.overzicht.netto,0);
+
+const domesticReverse = calculateFiscalVatReport([{id:'dr',type:'expense',amount_incl:100,description:'Binnenlandse verlegging'}], {dr:{classificatie:'domestic_reverse_charge',beoordeeld_door:'Boekhouder'}});
+assert.equal(domesticReverse.aangifte['2a'].btw,21); assert.equal(domesticReverse.aangifte['5b'],21);
+
+const exportCase = calculateFiscalVatReport([{id:'export',type:'income',amount_incl:100,description:'Export buiten EU'}], {export:{classificatie:'non_eu_output_0',beoordeeld_door:'Boekhouder'}});
+assert.equal(exportCase.aangifte['3a'].grondslag,100); assert.equal(exportCase.overzicht.output.total,0);
+
+const intra = calculateFiscalVatReport([{id:'intra',type:'income',amount_incl:100,description:'Intracommunautaire levering'}], {intra:{classificatie:'eu_output_0',beoordeeld_door:'Boekhouder'}});
+assert.equal(intra.aangifte['3b'].grondslag,100); assert.equal(intra.overzicht.output.total,0);
+
+const duplicate = [{id:'same',type:'income' as const,amount_incl:100,description:'A'},{id:'same',type:'income' as const,amount_incl:100,description:'B'}];
 assert.throws(() => calculateFiscalVatReport(duplicate));
 
-const summaries = calculateFiscalVatReport([
-  { id:'a', type:'income', amount_incl:121, description:'Verkoop 21%' },
-  { id:'total', type:'income', amount_incl:121, description:'TOTAAL' },
-], { a:{ percentage:21, beoordeeld_door:'Boekhouder' } });
-assert.equal(summaries.ignored.length, 1);
-assert.equal(summaries.overzicht.output.total, 21);
+const summaries = calculateFiscalVatReport([{id:'a',type:'income',amount_incl:121,description:'Verkoop 21%'},{id:'total',type:'income',amount_incl:121,description:'TOTAAL'}], {a:{percentage:21,beoordeeld_door:'Boekhouder'}});
+assert.equal(summaries.ignored.length,1); assert.equal(summaries.overzicht.output.total,21);
 
-const large = Array.from({length:20_000}, (_,i) => ({ id:`tx-${i}`, type:'income' as const, amount_incl:109, description:'Verkoop boek 9%' }));
+assert.throws(() => calculateFiscalVatReport([{id:'bad',type:'income',amount_incl:Number.NaN,description:'bad'}]));
+assert.throws(() => calculateFiscalVatReport([{id:'bad',type:'income',amount_incl:Number.POSITIVE_INFINITY,description:'bad'}]));
+assert.throws(() => calculateFiscalVatReport([{id:'bad',type:'income',amount_incl:100,description:'bad'}], {unknown:{percentage:21,beoordeeld_door:'Boekhouder'}}));
+assert.throws(() => calculateFiscalVatReport([{id:'bad',type:'income',amount_incl:100,description:'bad'}], {bad:{beoordeeld_door:''}}));
+
+const large = Array.from({length:100_000}, (_,i) => ({id:`tx-${i}`,type:'income' as const,amount_incl:109,description:'Verkoop boek 9%'}));
 const largeReport = calculateFiscalVatReport(large);
-assert.equal(largeReport.audit.input, 20_000);
-assert.equal(largeReport.audit.included, 0);
-assert.equal(largeReport.transactions.length, 20_000);
-assert.equal(largeReport.audit.ok, true);
+assert.equal(largeReport.audit.input,100_000); assert.equal(largeReport.audit.included,0); assert.equal(largeReport.transactions.length,100_000); assert.equal(largeReport.audit.ok,true);
 
 console.log('BTW fiscal V3 reference tests passed');
