@@ -21,7 +21,7 @@ jobs:
         run: npm audit --audit-level=high
       - name: Verify safe production boundary
         run: |
-          if find src -type f \( -name '*.ts' -o -name '*.tsx' \) ! -name 'btwEngineSafe.ts' ! -name 'btwEngine.ts' ! -name 'btwEngine.validatie.ts' ! -name 'vatEngine.ts' ! -name 'vatCalculator.ts' -print0 | xargs -0 grep -nE 'from [^ ]*btwEngine(\.js)?([^A-Za-z0-9_]|$)|require\([^)]*btwEngine(\.js)?([^A-Za-z0-9_]|$)' 2>/dev/null; then
+          if find src -type f \( -name '*.ts' -o -name '*.tsx' \) ! -name 'btwEngineSafe.ts' ! -name 'btwEngine.ts' ! -name 'btwEngine.validatie.ts' ! -name 'vatEngine.ts' ! -name 'vatCalculator.ts' -print0 | xargs -0 grep -nE 'from [^ ]*(btwEngine|vatEngine)(\.js)?([^A-Za-z0-9_]|$)|require\([^)]*(btwEngine|vatEngine)(\.js)?([^A-Za-z0-9_]|$)' 2>/dev/null; then
             echo 'Direct legacy VAT engine import found in production code'
             exit 1
           fi
