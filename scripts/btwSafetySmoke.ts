@@ -111,22 +111,35 @@ assert.equal(summary.overzicht.output.total, 21);
 const ambiguousDirectionCsv = 'Datum;Naam / Omschrijving;Af Bij;Bedrag (EUR)\n20260831;Test;onbekend;100,00\n';
 assert.throws(() => parseCsvToRawTransactions(ambiguousDirectionCsv));
 
-// 10,000-row stress test. The scale test deliberately uses explicit, unambiguous
-// transaction descriptions so its expected fiscal treatment is deterministic.
-// Automatic inference is tested separately above; this test is for scale,
-// arithmetic integrity, and the Dutch VAT rule paths themselves.
+// 10,000-row stress test. Automatic inference is tested separately above.
+// Here every row is explicitly classified so the test measures scale,
+// arithmetic integrity, and the fiscal aggregation paths without making
+// the expected totals depend on keyword heuristics.
 const templates = [
   (i:number) => ({ id:`scale-${i}`, type:'income' as const, amount_incl:109, description:'Verkoop boek 9%' }),
   (i:number) => ({ id:`scale-${i}`, type:'income' as const, amount_incl:121, description:'Verkoop software 21%' }),
-  (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:100, description:'Buitenlandse dienst btw verlegd', tegenrekening_iban:'US123456789' }),
+  (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:100, description:'Buitenlandse dienst', tegenrekening_iban:'US123456789' }),
   (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:109, description:'Restaurant diner' }),
-  (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:109, description:'Inkoop boodschappen 9%' }),
-  (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:109, description:'Inkoop boeken 9%' }),
-  (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:121, description:'KPN Zakelijk 21%' }),
+  (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:109, description:'Inkoop boodschappen' }),
+  (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:109, description:'Inkoop boeken' }),
+  (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:121, description:'KPN Zakelijk' }),
   (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:100, description:'Vrijgestelde dienst' }),
 ];
 const largeDataset = Array.from({ length: 10_000 }, (_, i) => templates[i % templates.length](i));
-const largeReport = calculateFiscalVatReport(largeDataset);
+const largeOverrides: Record<string, ReturnType<typeof review>> = {};
+for (let i = 0; i < largeDataset.length; i += 1) {
+  switch (i % templates.length) {
+    case 0: largeOverrides[`scale-${i}`] = review('domestic_output_9'); break;
+    case 1: largeOverrides[`scale-${i}`] = review('domestic_output_21'); break;
+    case 2: largeOverrides[`scale-${i}`] = review('non_eu_reverse_charge', 21); break;
+    case 3: largeOverrides[`scale-${i}`] = review('horeca_bua_9'); break;
+    case 4: largeOverrides[`scale-${i}`] = review('domestic_input_9'); break;
+    case 5: largeOverrides[`scale-${i}`] = review('domestic_input_9'); break;
+    case 6: largeOverrides[`scale-${i}`] = review('domestic_input_21'); break;
+    case 7: largeOverrides[`scale-${i}`] = review('exempt_input'); break;
+  }
+}
+const largeReport = calculateFiscalVatReport(largeDataset, largeOverrides);
 assert.equal(largeReport.audit.input, 10_000);
 assert.equal(largeReport.audit.included, 10_000);
 assert.equal(largeReport.audit.unresolved, 0);
@@ -136,11 +149,11 @@ assert.equal(largeReport.aangifte['1a'].btw, 26_250);
 assert.equal(largeReport.aangifte['1b'].btw, 11_250);
 assert.equal(largeReport.aangifte['4a'].btw, 26_250);
 assert.equal(largeReport.aangifte['5a'], 63_750);
-assert.equal(largeReport.aangifte['5b'], 63_750);
+assert.equal(largeReport.aangifte['5b'], 75_000);
 assert.equal(largeReport.overzicht.nonDeductible, 11_250);
-assert.equal(largeReport.overzicht.netto, 0);
+assert.equal(largeReport.overzicht.netto, -11_250);
 assert.equal(largeReport.transactions.length, 10_000);
-assert.ok(largeReport.transactions.some(t => t.confidence === 'low'));
+assert.ok(largeReport.transactions.every(t => t.confidence === 'high'));
 assert.ok(largeReport.transactions.some(t => t.classification === 'domestic_output_9'));
 assert.ok(largeReport.transactions.some(t => t.classification === 'domestic_output_21'));
 assert.ok(largeReport.transactions.some(t => t.classification === 'non_eu_reverse_charge'));
