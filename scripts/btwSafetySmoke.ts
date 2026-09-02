@@ -111,16 +111,16 @@ assert.equal(summary.overzicht.output.total, 21);
 const ambiguousDirectionCsv = 'Datum;Naam / Omschrijving;Af Bij;Bedrag (EUR)\n20260831;Test;onbekend;100,00\n';
 assert.throws(() => parseCsvToRawTransactions(ambiguousDirectionCsv));
 
-// 10,000-row mixed stress test. This deliberately exercises multiple
-// Dutch-rate/rule paths rather than only repeating one transaction shape.
+// 10,000-row mixed stress test. Each template represents a fiscally coherent
+// bank transaction and the expected totals below are derived from those rules.
 const templates = [
   (i:number) => ({ id:`scale-${i}`, type:'income' as const, amount_incl:109, description:'Verkoop boek 9%' }),
   (i:number) => ({ id:`scale-${i}`, type:'income' as const, amount_incl:121, description:'Onbekende klantbetaling' }),
   (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:100, description:'OpenAI LLC', tegenrekening_iban:'US123456789' }),
   (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:109, description:'Café De Hoek' }),
   (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:109, description:'Jumbo Supermarkten' }),
+  (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:109, description:'Inkoop boeken 9%' }),
   (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:121, description:'KPN Zakelijk' }),
-  (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:121, description:'Onbekende zakelijke inkoop' }),
   (i:number) => ({ id:`scale-${i}`, type:'expense' as const, amount_incl:1450, description:'Bankkosten' }),
 ];
 const largeDataset = Array.from({ length: 10_000 }, (_, i) => templates[i % templates.length](i));
