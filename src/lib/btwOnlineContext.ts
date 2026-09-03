@@ -83,22 +83,25 @@ export async function enrichVatTransactions(rows: RawTransaction[]): Promise<Raw
     if (category) resolved.set(query, { query, category, confidence: 0.99, source: 'SafeVault local merchant knowledge' });
   }
 
+  // Unknown descriptions are enriched in bounded batches. The external service
+  // returns categories only; it never supplies a VAT rate. The Dutch VAT engine
+  // remains the sole authority for the actual rate/classification.
   const unresolvedQueries = queries.filter(query => !resolved.has(query));
-  if (unresolvedQueries.length) {
+  for (let offset = 0; offset < unresolvedQueries.length; offset += 25) {
+    const batch = unresolvedQueries.slice(offset, offset + 25);
     try {
       const response = await fetch('/.netlify/functions/btw-context', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ queries: unresolvedQueries.slice(0, 25) }),
+        body: JSON.stringify({ queries: batch }),
       });
-      if (response.ok) {
-        const payload = await response.json() as { results?: ContextResult[] };
-        for (const result of payload.results ?? []) {
-          if (result?.query && result.category && result.confidence >= 0.85) resolved.set(result.query, result);
-        }
+      if (!response.ok) continue;
+      const payload = await response.json() as { results?: ContextResult[] };
+      for (const result of payload.results ?? []) {
+        if (result?.query && result.category && result.confidence >= 0.85) resolved.set(result.query, result);
       }
     } catch {
-      // Online enrichment is an enhancement only. VAT calculation must remain deterministic.
+      // Online enrichment is optional; a network failure must never alter or break VAT calculation.
     }
   }
 
