@@ -8,7 +8,6 @@
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "lint": "eslint .",
-    "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "test:btw-safety": "tsx scripts/btwSafetySmoke.ts && tsx scripts/btwFiscalV3Reference.ts && tsx scripts/btwCsvSafetyReference.ts && tsx scripts/btwParserReference.ts && tsx scripts/btwFiscalEdgeCases.ts && tsx src/lib/__tests__/btwSubmissionValidator.test.ts && tsx src/lib/__tests__/btwProductionSubmissionAudit.test.ts",
     "test": "tsx src/lib/__tests__/vatEngine.test.ts && tsx src/lib/__tests__/calculateVatReport.test.ts && tsx src/lib/__tests__/btwMerchantClassification.test.ts"
@@ -33,7 +32,7 @@
     "papaparse": "^5.5.4",
     "pdfjs-dist": "^6.3.289",
     "pg": "^8.23.0",
-    "qrcode": "^4.2.0",
+    "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
