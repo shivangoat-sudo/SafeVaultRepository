@@ -54,5 +54,5 @@ assert(byId('openai-nl').classification === 'unresolved', 'Een bekende buitenlan
 assert(report.audit.unresolved === 2, 'Alleen de twee bewust onvoldoende bewezen buitenlandse gevallen mogen unresolved blijven.');
 assert(report.aangifte['4a'].grondslag === 600 && report.aangifte['4a'].btw === 126, 'Niet-EU verlegging moet onafhankelijk op 4a worden opgeteld.');
 assert(report.aangifte['4b'].grondslag === 300 && report.aangifte['4b'].btw === 63, 'EU verlegging moet onafhankelijk op 4b worden opgeteld.');
-assert(report.aangifte['5b'] === 199, 'Aftrekbare verlegde btw plus de binnenlandse transacties moet correct worden opgeteld.');
+assert(report.aangifte['5b'] === 240, 'Aftrekbare verlegde btw plus binnenlandse aftrekbare btw moet correct worden opgeteld.');
 console.log('OK: production supplier context, EU/non-EU reverse charge, medical exemption, KVK fee, PostNL parcel service, accented Pathé recognition and fail-closed generic foreign service checks.');
