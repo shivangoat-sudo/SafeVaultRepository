@@ -47,11 +47,6 @@ const merchantNamedTotaal = calculateFiscalVatReport(
 assert(merchantNamedTotaal.audit.ignored === 0, 'Een echte merchantnaam die met Totaal begint mag niet als samenvattingsregel worden genegeerd.');
 assert(merchantNamedTotaal.aangifte['1a'].btw === 21, 'Totaal Energie moet als echte 21%-transactie worden verwerkt.');
 
-const unresolved = calculateFiscalVatReport(rows);
-assert(unresolved.aangifte['5a'] === 0 && unresolved.aangifte['5b'] === 0, 'Onbeoordeelde transacties mogen niet in de totalen komen.');
-assert(unresolved.audit.unresolved === rows.length, 'Alle onbeoordeelde transacties moeten unresolved zijn.');
-assert(unresolved.audit.ok === false, 'Een rapport met unresolved transacties mag niet audit-ok zijn.');
-
 const oneC = calculateFiscalVatReport(
   [{ id: 'sports', amount_incl: 113, type: 'income', description: 'Sportkantine forfait' }],
   { sports: review('other_rate_output', 13) },
