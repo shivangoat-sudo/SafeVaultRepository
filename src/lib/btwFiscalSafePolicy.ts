@@ -11,9 +11,14 @@ import type { RawTransaction } from './btwSafeTypes';
  *
  * Goal: classify ordinary Dutch bank transactions automatically. The engine
  * recognizes statutory 9% categories from the transaction text, recognizes
- * explicit exemptions/zero-rate/reverse-charge signals, and uses the Dutch
- * general 21% rate as the residual domestic rate. Only transactions for which
- * the available data does not support a Dutch treatment remain unresolved.
+ * merchant/business context, explicit exemptions/zero-rate/reverse-charge
+ * signals, and uses the Dutch general 21% rate as the residual domestic rate.
+ * Only transactions for which the available data does not support a Dutch
+ * treatment remain unresolved.
+ *
+ * Merchant recognition is deliberately performed before literal product-word
+ * matching. A bank line such as "GALL & GALL" therefore does not need to
+ * contain the word "wijn" or "drank" to reach the alcohol 21% rule.
  *
  * This is intentionally transaction-driven: imported spreadsheet VAT columns
  * never override the rule engine.
@@ -37,7 +42,6 @@ type SpecialHit = {
 const TABLE_I = 'Wet OB 1968, art. 9 lid 2 jo. Tabel I';
 const GENERAL_21 = 'Wet OB 1968, art. 9 lid 1 (algemeen 21%-tarief)';
 
-// 9% goederen: de wettelijke categorieën worden vóór de algemene 21%-regel getest.
 const RULE_9_GOODS: DutchVatRule[] = [
   { id:'food', pattern:/\b(voedingsmiddel(?:en)?|eetwaren|eten|brood(?:je|jes)?|kaas|melk|yoghurt|kwark|boter|margarine|eieren|ei|fruit|groente(?:n)?|aardappelen|vlees|vis|kip|vleeswaren|snoep(?:goed)?|chocolade|koek(?:jes)?|gebak|taart|chips|pasta|rijst|meel|granen|peulvruchten|noten|pinda(?:'s|s)?|jam|honing|ijsje|ijsjes|voedingspreparaat|voedingssupplement|vitaminen|vitamines|mineralen)\b/i, rate:9, wetsbasis:`${TABLE_I} (voedingsmiddelen).`, label:'Voedingsmiddel/-supplement: 9%-tarief.' },
   { id:'water', pattern:/\b(drinkwater|kraanwater|mineraalwater|bronwater|waterfles|waterflessen)\b/i, rate:9, wetsbasis:`${TABLE_I} (water).`, label:'Water: 9%-tarief.' },
@@ -48,7 +52,6 @@ const RULE_9_GOODS: DutchVatRule[] = [
   { id:'art_collectibles', pattern:/\b(kunstwerk|kunstvoorwerp|verzamelvoorwerp|antiek)\b/i, rate:9, wetsbasis:`${TABLE_I} (aangewezen kunst, verzamelvoorwerpen en antiek; voorwaarden gelden).`, label:'Aangewezen kunst/verzamelobject/antiek: 9%-tarief als voorwaarden zijn vervuld.' },
 ];
 
-// 9% diensten uit Tabel I / Toelichting Tabel I.
 const RULE_9_SERVICES: DutchVatRule[] = [
   { id:'hairdresser', pattern:/\b(kapper|kappers|kapsalon|knipbeurt|haarknippen|haar knippen|haarverzorging kapper)\b/i, rate:9, wetsbasis:`${TABLE_I} (diensten van kappers).`, label:'Kappersdienst: 9%-tarief.' },
   { id:'repairs', pattern:/\b(fietsreparatie|fiets reparatie|fietsenmaker|reparatie fiets|schoenenreparatie|schoenmaker|reparatie schoenen|lederwarenreparatie|reparatie lederwaren|kledingreparatie|kleding reparatie|reparatie kleding|reparatie huishoudlinnen)\b/i, rate:9, wetsbasis:`${TABLE_I} (repareren van fietsen, schoenen/lederwaren en kleding/huishoudlinnen).`, label:'Aangewezen reparatiedienst: 9%-tarief.' },
@@ -61,7 +64,6 @@ const RULE_9_SERVICES: DutchVatRule[] = [
   { id:'digital_books_news', pattern:/\b(e-boek|e-book|luisterboek|abonnement nieuwswebsite|nieuwswebsite|nieuwsapp|krant digitaal|tijdschrift digitaal)\b/i, rate:9, wetsbasis:`${TABLE_I} (e-boeken/nieuwswebsites onder wettelijke voorwaarden).`, label:'Digitaal boek/nieuws: 9%-tarief als voorwaarden zijn vervuld.' },
 ];
 
-// Duidelijke 21%-categorieën. Daarnaast geldt 21% als algemene restcategorie voor Nederlandse belastbare prestaties.
 const RULE_21: DutchVatRule[] = [
   { id:'alcohol', pattern:/\b(bier|wijn|champagne|prosecco|whisky|whiskey|wodka|vodka|rum|gin|likeur|sterke drank|alcoholische drank|alcoholhoudende drank|mixdrank|advocaat|kruidenwijn)\b/i, rate:21, wetsbasis:`${GENERAL_21}; alcoholhoudende dranken vallen niet onder het 9%-tarief.`, label:'Alcoholhoudende drank: 21%-tarief.' },
   { id:'electronics', pattern:/\b(laptop|computer|pc|desktop|monitor|beeldscherm|telefoon|smartphone|iphone|tablet|printer|scanner|camera|televisie|tv|koptelefoon|oortjes|headset|toetsenbord|muis|usb-stick|harddisk|ssd|router|modem)\b/i, rate:21, wetsbasis:GENERAL_21, label:'Elektronica: 21%-tarief.' },
@@ -76,6 +78,30 @@ const RULE_21: DutchVatRule[] = [
   { id:'construction', pattern:/\b(aannemer|bouwbedrijf|bouwmateriaal|metselwerk|timmerwerk|dakdekker|loodgieter|elektricien|installateur|installatiewerk|airco|cv-ketel|verwarming|tuinaanleg|tuinonderhoud|hovenier)\b/i, rate:21, wetsbasis:GENERAL_21, label:'Algemene bouw-/installatie-/hoveniersprestatie: 21%-tarief.' },
   { id:'vehicle_services', pattern:/\b(autogarage|garage|apk|autowas|carwash|autowassen|autoreparatie|reparatie auto|banden|autoband|motorfiets|scooter|onderhoud auto|onderhoud voertuig|lease auto|autolease|parkeergarage|parkeerkosten|parkeren)\b/i, rate:21, wetsbasis:GENERAL_21, label:'Voertuig-/parkeerdienst: 21%-tarief.' },
   { id:'space_services', pattern:/\b(zaalhuur|vergaderruimte|kantoorruimte|werkruimte|opslagruimte|self-storage)\b/i, rate:21, wetsbasis:GENERAL_21, label:'Ruimte/dienst: 21%-tarief tenzij een specifieke vrijstelling geldt.' },
+];
+
+// Merchant/business-context rules. These intentionally use the merchant name,
+// not the product word. They are kept separate from product rules so a bank
+// description such as "GALL & GALL" is enough to classify the transaction.
+const MERCHANT_RULES: DutchVatRule[] = [
+  { id:'merchant_gall_gall', pattern:/\b(gall\s*(?:&|and)\s*gall|gallengall)\b/i, rate:21, wetsbasis:`${GENERAL_21}; alcoholhoudende dranken vallen niet onder het 9%-tarief.`, label:'Gall & Gall/slijterij: alcoholhoudende dranken, 21%-tarief.' },
+  { id:'merchant_kpn', pattern:/\b(kpn)\b/i, rate:21, wetsbasis:GENERAL_21, label:'KPN: telecom/internetdienst, 21%-tarief.' },
+  { id:'merchant_vodafone', pattern:/\b(vodafone|vodafoneziggo)\b/i, rate:21, wetsbasis:GENERAL_21, label:'Vodafone: telecomdienst, 21%-tarief.' },
+  { id:'merchant_odido', pattern:/\b(odido|tele2)\b/i, rate:21, wetsbasis:GENERAL_21, label:'Odido/Tele2: telecomdienst, 21%-tarief.' },
+  { id:'merchant_ziggo', pattern:/\b(ziggo)\b/i, rate:21, wetsbasis:GENERAL_21, label:'Ziggo: telecom/internetdienst, 21%-tarief.' },
+  { id:'merchant_ns', pattern:/\b(ns\s*(?:zakelijk|reizen|reis)?|nederlandse spoorwegen)\b/i, rate:9, wetsbasis:`${TABLE_I} (personenvervoer).`, label:'NS/personenvervoer: 9%-tarief.' },
+  { id:'merchant_arriva', pattern:/\b(arriva)\b/i, rate:9, wetsbasis:`${TABLE_I} (personenvervoer).`, label:'Arriva/personenvervoer: 9%-tarief.' },
+  { id:'merchant_ret', pattern:/\b(ret)\b/i, rate:9, wetsbasis:`${TABLE_I} (personenvervoer).`, label:'RET/personenvervoer: 9%-tarief.' },
+  { id:'merchant_gvb', pattern:/\b(gvb)\b/i, rate:9, wetsbasis:`${TABLE_I} (personenvervoer).`, label:'GVB/personenvervoer: 9%-tarief.' },
+  { id:'merchant_connexxion', pattern:/\b(connexxion)\b/i, rate:9, wetsbasis:`${TABLE_I} (personenvervoer).`, label:'Connexxion/personenvervoer: 9%-tarief.' },
+  { id:'merchant_pathe', pattern:/\b(path[ée]|pathe)\b/i, rate:9, wetsbasis:`${TABLE_I} (toegang tot culturele en recreatieve voorzieningen).`, label:'Pathé/bioscoop: 9%-tarief.' },
+  { id:'merchant_basic_fit', pattern:/\b(basic[-\s]?fit)\b/i, rate:9, wetsbasis:`${TABLE_I} (gelegenheid tot sportbeoefening).`, label:'Basic-Fit/sportbeoefening: 9%-tarief.' },
+  { id:'merchant_fit_for_free', pattern:/\b(fit\s*for\s*free)\b/i, rate:9, wetsbasis:`${TABLE_I} (gelegenheid tot sportbeoefening).`, label:'Fit For Free/sportbeoefening: 9%-tarief.' },
+  { id:'merchant_ikea', pattern:/\b(ikea)\b/i, rate:21, wetsbasis:GENERAL_21, label:'IKEA/algemene goederen: 21%-tarief.' },
+  { id:'merchant_coolblue', pattern:/\b(coolblue)\b/i, rate:21, wetsbasis:GENERAL_21, label:'Coolblue/algemene goederen: 21%-tarief.' },
+  { id:'merchant_gamma', pattern:/\b(gamma)\b/i, rate:21, wetsbasis:GENERAL_21, label:'GAMMA/algemene bouw- en klusgoederen: 21%-tarief.' },
+  { id:'merchant_karwei', pattern:/\b(karwei)\b/i, rate:21, wetsbasis:GENERAL_21, label:'KARWEI/algemene bouw- en klusgoederen: 21%-tarief.' },
+  { id:'merchant_praxis', pattern:/\b(praxis)\b/i, rate:21, wetsbasis:GENERAL_21, label:'Praxis/algemene bouw- en klusgoederen: 21%-tarief.' },
 ];
 
 function normalizedCountry(row: RawTransaction): string {
@@ -128,15 +154,18 @@ function findDutchRule(row: RawTransaction): DutchVatRule | null {
   const text = normalizedText(row);
   if (!text || hasExplicitRate(text) || hasExplicitReverseCharge(text) || hasExplicitExemption(text)) return null;
 
+  const merchantHits = MERCHANT_RULES.filter(rule => rule.pattern.test(text));
   const nine = RULE_9_GOODS.concat(RULE_9_SERVICES).filter(rule => rule.pattern.test(text));
   const twentyOne = RULE_21.filter(rule => rule.pattern.test(text));
 
-  // Product/service descriptions containing both a 9%- and a 21%-signal are
-  // intentionally resolved to 21% for the bank-based calculation, per product
-  // policy. This prevents a single mixed bank line from being pushed to review.
-  if (nine.length > 0 && twentyOne.length > 0) return twentyOne[0];
+  // Merchant/business context is stronger than a literal product-word match.
+  // Example: GALL & GALL does not need to contain "wijn" to be recognized as
+  // a liquor retailer. This is the first automatic classification layer.
+  if (merchantHits.length > 0) return merchantHits[0];
 
-  // If several 9% signals occur, keep the transaction in the 9% statutory family.
+  // If both 9% and 21% signals occur, use the explicit product policy requested
+  // for bank-based calculations: resolve the row to 21% instead of review.
+  if (nine.length > 0 && twentyOne.length > 0) return twentyOne[0];
   if (nine.length > 0) return nine[0];
   if (twentyOne.length > 0) return twentyOne[0];
   return null;
@@ -151,10 +180,12 @@ function applyDutchVatRules(rows: RawTransaction[]): { rows: RawTransaction[]; m
       return { ...row, description:`${String(row.description ?? '').trim()} [SafeVault btw-regel ${rule.rate}%]` };
     }
 
-    // For an ordinary Dutch transaction with a usable description, the general
-    // 21% rate is the statutory residual. This is what keeps ordinary rows out
-    // of the manual queue instead of requiring a human to confirm 21% one by one.
-    if (isDomestic(row) && normalizedText(row) && !hasExplicitRate(normalizedText(row)) && !hasExplicitReverseCharge(normalizedText(row)) && !hasExplicitExemption(normalizedText(row))) {
+    // The general Dutch 21% rate is the statutory residual for ordinary Dutch
+    // taxable goods/services. It prevents routine bank lines from becoming
+    // manual work one by one. Explicit exemptions/foreign/zero-rate/reverse-
+    // charge cases have already been excluded above.
+    const text = normalizedText(row);
+    if (isDomestic(row) && text && !hasExplicitRate(text) && !hasExplicitReverseCharge(text) && !hasExplicitExemption(text)) {
       const fallback: DutchVatRule = { id:'general_21_residual', pattern:/.*/, rate:21, wetsbasis:GENERAL_21, label:'Algemene Nederlandse hoofdregel: 21%-tarief.' };
       matched.set(row.id, fallback);
       return { ...row, description:`${String(row.description ?? '').trim()} [SafeVault btw-regel 21%]` };
@@ -205,8 +236,6 @@ export function calculateFiscalVatReport(rows: RawTransaction[], overrides: Reco
     return row;
   });
 
-  // Explicit 0% and reverse-charge signals are handled by the safe core. The
-  // policy layer never invents foreign reverse charge from an IBAN alone.
   const { rows:ruleAppliedRows, matched } = applyDutchVatRules(prepared);
   const report = calculateCore(ruleAppliedRows, overrides, adjustments);
   return attachRuleMetadata(report, matched);
