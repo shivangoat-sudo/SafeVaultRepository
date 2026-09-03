@@ -48,6 +48,13 @@ function enrichDeterministicContext(rows: RawTransaction[]): RawTransaction[] {
     if (foreignSupplierSignal(row) === 'non_eu') return addMarker(row, 'btw verlegd');
     if (foreignSupplierSignal(row) === 'eu') return addMarker(row, 'btw verlegd');
 
+    // Pathé is a known cinema merchant. The legacy regex used an ASCII word
+    // boundary that does not reliably match the accented "é" in plain bank
+    // descriptions such as "Pathé". Add only the category signal, not a rate.
+    if (row.type === 'expense' && /\bpath[eé]\b/i.test(text) && !hasFiscalSignal(text)) {
+      return addMarker(row, 'bioscoop');
+    }
+
     // Strong medical identity: the exemption applies to qualifying personal
     // healthcare, including dentists. The engine still records the result as
     // an exemption rather than pretending there is deductible input VAT.
@@ -55,9 +62,8 @@ function enrichDeterministicContext(rows: RawTransaction[]): RawTransaction[] {
       return addMarker(row, 'vrijgesteld tandheelkundige behandeling');
     }
 
-    // KVK registration fees are treated as non-VAT statutory fees in the
-    // production context layer. If the bank line explicitly contains VAT
-    // evidence, that evidence wins and the row is left to the fiscal engine.
+    // KVK registration fees are a statutory fee rather than a normal VAT
+    // bearing supplier invoice; do not manufacture input VAT from the bank line.
     if (row.type === 'expense' && /\b(kvk|kamer\s+van\s+koophandel)\b/i.test(text) && !hasFiscalSignal(text)) {
       return addMarker(row, 'vrijgesteld');
     }
