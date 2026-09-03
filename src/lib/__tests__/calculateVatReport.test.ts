@@ -3,7 +3,7 @@ import type { RawTransaction } from '../btwSafeTypes';
 
 const review=(classificatie:BoekhouderBeoordeling['classificatie'],percentage?:number):BoekhouderBeoordeling=>({classificatie,beoordeeld_door:'Testboekhouder',...(percentage===undefined?{}:{percentage})});
 const assert=(condition:boolean,message:string)=>{if(!condition)throw new Error(message);};
-const unknownIncome=calculateFiscalVatReport([{id:'unknown-income',description:'Onbekende klantbetaling',amount_incl:121,type:'income'}]);
+const unknownIncome=calculateFiscalVatReport([{id:'unknown-income',description:'',amount_incl:121,type:'income'}]);
 assert(!unknownIncome.audit.ok,'Een onbeoordeelde onbekende transactie mag het fiscale rapport niet als compleet markeren.');
 assert(unknownIncome.audit.unresolved===1,'Onvoldoende informatie moet unresolved zijn.');
 assert(unknownIncome.audit.included===0,'Een unresolved transactie mag niet in de financiële totalen komen.');
@@ -27,6 +27,19 @@ assert(smart.transactions[1].classification==='domestic_input_21'&&smart.transac
 assert(smart.transactions[2].classification==='domestic_input_9'&&smart.transactions[2].vat.status==='known','Zakelijke NS-transactie moet automatisch als 9% worden herkend.');
 assert(smart.audit.included===3&&smart.audit.unresolved===0,'Duidelijk herkenbare transacties mogen niet onnodig als unresolved eindigen.');
 
+// Merchant/contextherkenning: de bankomschrijving hoeft het product niet letterlijk te noemen.
+const merchantContext=calculateFiscalVatReport([
+  {id:'gall',amount_incl:121,type:'expense',description:'GALL & GALL'},
+  {id:'pathe',amount_incl:109,type:'expense',description:'Pathé'},
+  {id:'basic-fit',amount_incl:109,type:'expense',description:'BASIC-FIT'},
+  {id:'coolblue',amount_incl:121,type:'expense',description:'Coolblue'},
+]);
+assert(merchantContext.transactions[0].classification==='domestic_input_21','GALL & GALL moet via merchantcontext automatisch 21% worden herkend zonder dat wijn/drank in de omschrijving staat.');
+assert(merchantContext.transactions[1].classification==='domestic_input_9','Pathé moet via merchantcontext automatisch als bioscoop/9% worden herkend.');
+assert(merchantContext.transactions[2].classification==='domestic_input_9','Basic-Fit moet via merchantcontext automatisch als sport/9% worden herkend.');
+assert(merchantContext.transactions[3].classification==='domestic_input_21','Coolblue moet via merchantcontext automatisch als algemene goederen/21% worden herkend.');
+assert(merchantContext.audit.included===4&&merchantContext.audit.unresolved===0,'Bekende merchants mogen niet onnodig in de handmatige wachtrij terechtkomen.');
+
 // Product-/dienstregels: de engine koppelt herkenbare omschrijvingen aan het Nederlandse tarief.
 const dutchRules=calculateFiscalVatReport([
   {id:'food',amount_incl:109,type:'income',description:'Verkoop brood en voedingsmiddelen'},
@@ -45,7 +58,12 @@ assert(dutchRules.transactions[5].classification==='domestic_output_21','Elektro
 assert(dutchRules.transactions.every(tx=>tx.vat.status==='known'&&tx.includedInTotals),'Duidelijke wettelijke tariefregels moeten zonder boekhouderoverride worden verwerkt.');
 assert(dutchRules.transactions[0].rule.wetsbasis.includes('Tabel I'),'De toegepaste 9%-regel moet de wettelijke basis tonen.');
 
-// Belangrijke uitzonderingen: buitenlandse IBAN alleen is nooit bewijs voor verlegging.
+// Als 9% en 21% signalen beide voorkomen, geldt de afgesproken bankregel: 21%.
+const mixed=calculateFiscalVatReport([{id:'mixed',amount_incl:121,type:'expense',description:'Supermarkt voedsel en alcohol'}]);
+assert(mixed.transactions[0].classification==='domestic_input_21','Een omschrijving met zowel 9%- als 21%-signalen moet volgens de productpolicy 21% worden.');
+assert(mixed.audit.unresolved===0,'Een gemengde 9%/21%-omschrijving mag niet naar de boekhouder worden doorgeschoven.');
+
+// Buitenlandse IBAN alleen is nooit bewijs voor verlegging.
 const foreignService=calculateFiscalVatReport([{id:'foreign-service',amount_incl:121,type:'expense',description:'Software subscription',tegenrekening_iban:'DE12345678901234567890'}]);
 assert(foreignService.transactions[0].classification==='unresolved','Buitenlandse IBAN + algemene serviceomschrijving mag niet automatisch reverse charge worden.');
 assert(foreignService.aangifte['4a'].btw===0&&foreignService.aangifte['4b'].btw===0,'Onbewezen buitenlandse verlegging mag niet automatisch in 4a/4b terechtkomen.');
@@ -57,4 +75,4 @@ assert(lodging2026.transactions[0].classification==='domestic_output_21','Logies
 let threw=false;try{calculateFiscalVatReport([{id:'bad-1c',amount_incl:105,type:'income',description:'Onbekend overig tarief'}],{'bad-1c':review('other_rate_output',5)});}catch{threw=true}assert(threw,'Een willekeurig 1c-tarief moet worden geweigerd.');
 threw=false;try{calculateFiscalVatReport([{id:'bad',amount_incl:121,type:'expense'}],{bad:review('domestic_output_21')});}catch{threw=true}assert(threw,'Een omzetclassificatie op een expense-transactie moet worden geweigerd.');
 threw=false;try{calculateFiscalVatReport([{id:'dup',amount_incl:121,type:'income'},{id:'dup',amount_incl:109,type:'income'}]);}catch{threw=true}assert(threw,'Dubbele transactie-ID moet worden geweigerd.');
-console.log('OK: veilige fiscale rapportage, slimme Nederlandse product-/dienstregels, unresolved fail-closed, Nederlandse 1c-policy, merchant-summary safety, verlegging 9/21%, classificatievalidatie en reconciliatie.');
+console.log('OK: veilige fiscale rapportage, merchant-contextherkenning, slimme Nederlandse product-/dienstregels, mixed-rate policy, unresolved fail-closed, Nederlandse 1c-policy, merchant-summary safety, verlegging 9/21%, classificatievalidatie en reconciliatie.');
