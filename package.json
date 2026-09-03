@@ -9,12 +9,12 @@
     "start": "node dist/server.cjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
-    "test:btw-safety": "tsx scripts/btwSafetySmoke.ts && tsx scripts/btwFiscalV3Reference.ts && tsx scripts/btwCsvSafetyReference.ts && tsx scripts/btwParserReference.ts && tsx scripts/btwFiscalEdgeCases.ts && tsx src/lib/__tests__/btwSubmissionValidator.test.ts && tsx src/lib/__tests__/btwProductionSubmissionAudit.test.ts",
-    "test": "tsx src/lib/__tests__/vatEngine.test.ts && tsx src/lib/__tests__/calculateVatReport.test.ts && tsx src/lib/__tests__/btwMerchantClassification.test.ts"
+    "test:btw-safety": "tsx scripts/btwSafetySmoke.ts && tsx scripts/btwFiscalV3Reference.ts && tsx scripts/btwCsvSafetyReference.ts && tsx scripts/btwParserReference.ts && tsx scripts/btwFiscalEdgeCases.ts && tsx src/lib/__tests__/btwSubmissionValidator.test.ts && tsx src/lib/__tests__/btwProductionSubmissionAudit.test.ts && tsx src/lib/__tests__/btwProductionContext.test.ts",
+    "test": "tsx src/lib/__tests__/vatEngine.test.ts && tsx src/lib/__tests__/calculateVatReport.test.ts && tsx src/lib/__tests__/btwMerchantClassification.test.ts && tsx src/lib/__tests__/btwProductionContext.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.17.1",
-    "@supabase/supabase-js": "^2.57.4",
+    "@supabase/supabase-js": "^2.57.0",
     "@types/papaparse": "^5.5.2",
     "@types/pg": "^8.21.0",
     "@types/qrcode": "^1.5.6",
@@ -43,10 +43,10 @@
     "@types/node": "^26.1.2",
     "@types/nodemailer": "^8.0.0",
     "@types/react": "^18.3.5",
-    "@types/react-dom": "^18.3.0",
+    "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^6.1.0",
     "autoprefixer": "^10.4.18",
-    "postcss": "^8.4.35",
+    "postcss": "^8.4.18",
     "tailwindcss": "^3.4.1",
     "tsx": "^4.23.12",
     "typescript": "^5.5.3",
