@@ -10,7 +10,6 @@ import type { RawTransaction } from './btwSafeTypes';
  * strong supplier/service identity. It never invents a VAT rate and never
  * treats a foreign IBAN by itself as reverse charge.
  */
-const EU = new Set(['AT','BE','BG','CY','CZ','DE','DK','EE','ES','FI','FR','GR','HR','HU','IE','IT','LT','LU','LV','MT','NL','PL','PT','RO','SE','SI','SK']);
 const countryOf = (row: RawTransaction) => String(row.tegenrekening_iban ?? '').replace(/\s/g, '').toUpperCase().slice(0, 2);
 const textOf = (row: RawTransaction) => `${row.description ?? ''} ${row.memo ?? ''}`.replace(/\s+/g, ' ').trim();
 const hasFiscalSignal = (text: string) => /(?:^|[^0-9])(?:0|9|21)\s*%|\b(?:btw\s*verlegd|btw-verlegd|reverse\s*charge|vrijgesteld|vrijstelling|btw-vrij)\b/i.test(text);
@@ -56,8 +55,9 @@ function enrichDeterministicContext(rows: RawTransaction[]): RawTransaction[] {
       return addMarker(row, 'vrijgesteld tandheelkundige behandeling');
     }
 
-    // KVK registration fees are a statutory fee rather than a normal VAT
-    // bearing supplier invoice; do not manufacture input VAT from the bank line.
+    // KVK registration fees are treated as non-VAT statutory fees in the
+    // production context layer. If the bank line explicitly contains VAT
+    // evidence, that evidence wins and the row is left to the fiscal engine.
     if (row.type === 'expense' && /\b(kvk|kamer\s+van\s+koophandel)\b/i.test(text) && !hasFiscalSignal(text)) {
       return addMarker(row, 'vrijgesteld');
     }
@@ -73,5 +73,3 @@ export function calculateProductionVatReport(
 ): FiscalReport {
   return calculatePolicyReport(enrichDeterministicContext(rows), overrides, adjustments);
 }
-
-export { EU };
