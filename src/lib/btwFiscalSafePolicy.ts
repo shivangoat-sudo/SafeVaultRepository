@@ -10,11 +10,11 @@ import type { RawTransaction } from './btwSafeTypes';
  * Dutch VAT policy layer.
  *
  * Goal: classify ordinary Dutch bank transactions automatically. The engine
- * recognizes statutory 9% categories from the transaction text, recognizes
- * merchant/business context, explicit exemptions/zero-rate/reverse-charge
- * signals, and uses the Dutch general 21% rate as the residual domestic rate.
- * Only transactions for which the available data does not support a Dutch
- * treatment remain unresolved.
+ * recognizes statutory 9% categories from transaction text, merchant/business
+ * context, explicit exemptions/zero-rate/reverse-charge signals, and applies
+ * the Dutch general 21% rate only when the transaction context actually
+ * supports a taxable 21% treatment. A bare/insufficient bank description is
+ * never silently converted into 21%.
  *
  * Merchant recognition is deliberately performed before literal product-word
  * matching. A bank line such as "GALL & GALL" therefore does not need to
@@ -80,9 +80,6 @@ const RULE_21: DutchVatRule[] = [
   { id:'space_services', pattern:/\b(zaalhuur|vergaderruimte|kantoorruimte|werkruimte|opslagruimte|self-storage)\b/i, rate:21, wetsbasis:GENERAL_21, label:'Ruimte/dienst: 21%-tarief tenzij een specifieke vrijstelling geldt.' },
 ];
 
-// Merchant/business-context rules. These intentionally use the merchant name,
-// not the product word. They are kept separate from product rules so a bank
-// description such as "GALL & GALL" is enough to classify the transaction.
 const MERCHANT_RULES: DutchVatRule[] = [
   { id:'merchant_gall_gall', pattern:/\b(gall\s*(?:&|and)\s*gall|gallengall)\b/i, rate:21, wetsbasis:`${GENERAL_21}; alcoholhoudende dranken vallen niet onder het 9%-tarief.`, label:'Gall & Gall/slijterij: alcoholhoudende dranken, 21%-tarief.' },
   { id:'merchant_kpn', pattern:/\b(kpn)\b/i, rate:21, wetsbasis:GENERAL_21, label:'KPN: telecom/internetdienst, 21%-tarief.' },
@@ -158,13 +155,10 @@ function findDutchRule(row: RawTransaction): DutchVatRule | null {
   const nine = RULE_9_GOODS.concat(RULE_9_SERVICES).filter(rule => rule.pattern.test(text));
   const twentyOne = RULE_21.filter(rule => rule.pattern.test(text));
 
-  // Merchant/business context is stronger than a literal product-word match.
-  // Example: GALL & GALL does not need to contain "wijn" to be recognized as
-  // a liquor retailer. This is the first automatic classification layer.
   if (merchantHits.length > 0) return merchantHits[0];
 
-  // If both 9% and 21% signals occur, use the explicit product policy requested
-  // for bank-based calculations: resolve the row to 21% instead of review.
+  // If both 9% and 21% signals occur, use the explicit bank-line policy
+  // requested for this project: resolve the row to 21% rather than review.
   if (nine.length > 0 && twentyOne.length > 0) return twentyOne[0];
   if (nine.length > 0) return nine[0];
   if (twentyOne.length > 0) return twentyOne[0];
@@ -180,16 +174,10 @@ function applyDutchVatRules(rows: RawTransaction[]): { rows: RawTransaction[]; m
       return { ...row, description:`${String(row.description ?? '').trim()} [SafeVault btw-regel ${rule.rate}%]` };
     }
 
-    // The general Dutch 21% rate is the statutory residual for ordinary Dutch
-    // taxable goods/services. It prevents routine bank lines from becoming
-    // manual work one by one. Explicit exemptions/foreign/zero-rate/reverse-
-    // charge cases have already been excluded above.
-    const text = normalizedText(row);
-    if (isDomestic(row) && text && !hasExplicitRate(text) && !hasExplicitReverseCharge(text) && !hasExplicitExemption(text)) {
-      const fallback: DutchVatRule = { id:'general_21_residual', pattern:/.*/, rate:21, wetsbasis:GENERAL_21, label:'Algemene Nederlandse hoofdregel: 21%-tarief.' };
-      matched.set(row.id, fallback);
-      return { ...row, description:`${String(row.description ?? '').trim()} [SafeVault btw-regel 21%]` };
-    }
+    // Fail closed. The statutory 21% residual does not mean that a bank line
+    // by itself proves that a taxable Dutch 21% transaction occurred. If no
+    // specific merchant/category/evidence signal exists, the transaction must
+    // remain unresolved for review instead of being silently included.
     return row;
   });
   return { rows:transformed, matched };
