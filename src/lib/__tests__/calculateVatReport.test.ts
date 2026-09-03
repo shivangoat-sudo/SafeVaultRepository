@@ -30,7 +30,7 @@ assert(smart.audit.included===3&&smart.audit.unresolved===0,'Duidelijk herkenbar
 // Merchant/contextherkenning: de bankomschrijving hoeft het product niet letterlijk te noemen.
 const merchantContext=calculateFiscalVatReport([
   {id:'gall',amount_incl:121,type:'expense',description:'GALL & GALL'},
-  {id:'pathe',amount_incl:109,type:'expense',description:'Pathé'},
+  {id:'pathe',amount_incl:109,type:'expense',description:'Pathé bioscoop'},
   {id:'basic-fit',amount_incl:109,type:'expense',description:'BASIC-FIT'},
   {id:'coolblue',amount_incl:121,type:'expense',description:'Coolblue'},
 ]);
