@@ -55,6 +55,13 @@ function enrichDeterministicContext(rows: RawTransaction[]): RawTransaction[] {
       return addMarker(row, 'bioscoop');
     }
 
+    // PostNL Pakketten is a specific parcel service. The exemption for postal
+    // services is limited to qualifying universal postal services; a parcel
+    // service line is therefore not silently treated as exempt.
+    if (row.type === 'expense' && /\bpostnl\b.*\bpakketten?\b|\bpakketten?\b.*\bpostnl\b/i.test(text) && !hasFiscalSignal(text)) {
+      return addMarker(row, 'pakketdienst 21%');
+    }
+
     // Strong medical identity: the exemption applies to qualifying personal
     // healthcare, including dentists. The engine still records the result as
     // an exemption rather than pretending there is deductible input VAT.
