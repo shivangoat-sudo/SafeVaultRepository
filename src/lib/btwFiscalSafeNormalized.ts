@@ -22,6 +22,16 @@ export type FiscalReport = Omit<CoreFiscalReport, 'overzicht'> & {
   };
 };
 
+function toCoreReport(report: FiscalReport): CoreFiscalReport {
+  return {
+    ...report,
+    overzicht: {
+      ...report.overzicht,
+      status: report.overzicht.status === 'af_te_dragen' ? 'af_te_drager' : 'terug_te_vorderen',
+    },
+  };
+}
+
 export function calculateFiscalVatReport(
   rows: import('./btwSafeTypes').RawTransaction[],
   overrides: Record<string, BoekhouderBeoordeling> = {},
@@ -37,9 +47,16 @@ export function calculateFiscalVatReport(
   };
 }
 
-export const tweeKolommenWeergave = coreTweeKolommenWeergave;
-export const berekenBetrouwbaarheidsscore = coreBerekenBetrouwbaarheidsscore;
+export function tweeKolommenWeergave(report: FiscalReport) {
+  return coreTweeKolommenWeergave(toCoreReport(report));
+}
+
+export function berekenBetrouwbaarheidsscore(report: FiscalReport) {
+  return coreBerekenBetrouwbaarheidsscore(toCoreReport(report));
+}
+
 export { BOEKHOUDER_PERCENTAGE_OPTIES };
+export { FISCAL_CLASSIFICATION_OPTIONS } from './btwFiscalSafeUiOptions';
 export type {
   BtwPercentage,
   BoekhouderBeoordeling,
