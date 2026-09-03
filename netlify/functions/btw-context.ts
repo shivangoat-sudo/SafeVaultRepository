@@ -19,6 +19,9 @@ type LookupResult = { query: string; category: ContextCategory; confidence: numb
 
 const MAX_QUERIES = 25;
 const MAX_QUERY_LENGTH = 140;
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const LOOKUP_TIMEOUT_MS = 8000;
+const cache = new Map<string, { expiresAt: number; result: LookupResult }>();
 
 const CATEGORY_RULES: Array<{ category: ContextCategory; patterns: RegExp[]; confidence: number }> = [
   { category: 'alcohol_retail', patterns: [/slijter/i, /drankenspeciaalzaak/i, /wijnhandel/i, /liquor store/i, /wine shop/i, /alcoholische dranken/i], confidence: 0.96 },
@@ -40,6 +43,8 @@ function cleanQuery(value: unknown): string {
   return String(value ?? '')
     .replace(/[\r\n\t]+/g, ' ')
     .replace(/\b(?:NL)?\d{2}[A-Z]{0,2}\d{4,30}\b/gi, ' ')
+    .replace(/\b\d{1,3}(?:[.,]\d{1,2})?\s*(?:EUR|EURO|€)\b/gi, ' ')
+    .replace(/\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/g, ' ')
     .replace(/\b\d{6,}\b/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
@@ -61,15 +66,22 @@ async function searchJina(query: string): Promise<{ text: string; source: string
   const apiKey = process.env.JINA_API_KEY;
   if (!apiKey) return { text: '', source: null };
 
-  const url = `https://s.jina.ai/${encodeURIComponent(`${query} Netherlands company business`)}`;
-  const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${apiKey}`, Accept: 'text/plain' },
-  });
-  if (!response.ok) return { text: '', source: null };
+  const url = `https://s.jina.ai/${encodeURIComponent(`${query} Netherlands company business official`)}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), LOOKUP_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${apiKey}`, Accept: 'text/plain' },
+      signal: controller.signal,
+    });
+    if (!response.ok) return { text: '', source: null };
 
-  const text = (await response.text()).slice(0, 12000);
-  const sourceMatch = text.match(/https?:\/\/[^\s)]+/i);
-  return { text, source: sourceMatch?.[0] ?? null };
+    const text = (await response.text()).slice(0, 12000);
+    const sourceMatch = text.match(/https?:\/\/[^\s)]+/i);
+    return { text, source: sourceMatch?.[0] ?? null };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export default async function handler(req: Request): Promise<Response> {
@@ -82,10 +94,18 @@ export default async function handler(req: Request): Promise<Response> {
   const results: LookupResult[] = [];
 
   for (const query of queries) {
+    const cached = cache.get(query);
+    if (cached && cached.expiresAt > Date.now()) {
+      results.push(cached.result);
+      continue;
+    }
+
     try {
       const { text, source } = await searchJina(query);
       const classification = classifySearchText(text);
-      results.push({ query, category: classification.category, confidence: classification.confidence, source });
+      const result: LookupResult = { query, category: classification.category, confidence: classification.confidence, source };
+      cache.set(query, { expiresAt: Date.now() + CACHE_TTL_MS, result });
+      results.push(result);
     } catch {
       results.push({ query, category: 'mixed_or_unknown', confidence: 0, source: null });
     }
