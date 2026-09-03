@@ -58,10 +58,10 @@ function classifySearchText(text: string): { category: ContextCategory; confiden
 }
 
 async function searchJina(query: string): Promise<{ text: string; source: string | null }> {
-  const apiKey = Deno.env.get('JINA_API_KEY');
+  const apiKey = process.env.JINA_API_KEY;
   if (!apiKey) return { text: '', source: null };
 
-  const url = `https://s.jina.ai/${encodeURIComponent(`${query} Netherlands company business` )}`;
+  const url = `https://s.jina.ai/${encodeURIComponent(`${query} Netherlands company business`)}`;
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${apiKey}`, Accept: 'text/plain' },
   });
