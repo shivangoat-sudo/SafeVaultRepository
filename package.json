@@ -8,10 +8,9 @@
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "lint": "eslint .",
-    "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "test:btw-safety": "tsx scripts/btwSafetySmoke.ts && tsx scripts/btwFiscalV3Reference.ts && tsx scripts/btwCsvSafetyReference.ts && tsx scripts/btwParserReference.ts && tsx scripts/btwFiscalEdgeCases.ts && tsx src/lib/__tests__/btwSubmissionValidator.test.ts && tsx src/lib/__tests__/btwProductionSubmissionAudit.test.ts",
-    "test": "tsx src/lib/__tests__/vatEngine.test.ts && tsx src/lib/__tests__/calculateVatReport.test.ts"
+    "test": "tsx src/lib/__tests__/vatEngine.test.ts && tsx src/lib/__tests__/calculateVatReport.test.ts && tsx src/lib/__tests__/btwMerchantClassification.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.17.1",
@@ -20,6 +19,7 @@
     "@types/pg": "^8.21.0",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
     "bcryptjs": "^3.0.3",
     "dotenv": "^17.4.2",
     "esbuild": "^0.28.2",
@@ -33,7 +33,7 @@
     "papaparse": "^5.5.4",
     "pdfjs-dist": "^6.3.289",
     "pg": "^8.23.0",
-    "qrcode": "^1.5.4",
+    "qrcode": "^4.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
@@ -47,7 +47,7 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^6.1.0",
     "autoprefixer": "^10.4.18",
-    "postcss": "^8.4.35",
+    "postcss": "^8.4.18",
     "tailwindcss": "^3.4.1",
     "tsx": "^4.23.12",
     "typescript": "^5.5.3",
