@@ -4,6 +4,7 @@ import { useToast } from '@/components/Toast';
 import { EmptyState, Spinner } from '@/components/ui';
 import { parseCsvToRawTransactions } from '@/utils/vatCsvParser';
 import { calculateFiscalVatReport, tweeKolommenWeergave, berekenBetrouwbaarheidsscore, FISCAL_CLASSIFICATION_OPTIONS, type FiscalReport, type BoekhouderBeoordeling } from '@/lib/btwFiscalSafeNormalized';
+import { enrichVatTransactions } from '@/lib/btwOnlineContext';
 import type { RawTransaction } from '@/lib/btwSafeTypes';
 import { Calculator, AlertTriangle, CheckCircle2, TrendingDown, TrendingUp, ArrowDownUp, FileSpreadsheet, UserCheck, Info } from 'lucide-react';
 import type { FileRow } from '@/types';
@@ -18,7 +19,7 @@ export function VatCalculator({customerId}:{customerId:string}) {
  const matchingFiles=useMemo(()=>files.filter(f=>f.category==='income_overview'&&(!f.quarter||String(f.quarter).toUpperCase()===quarter)&&(!f.year||f.year===year)&&(/\.(csv|txt)$/i.test(f.original_name))),[files,quarter,year]);
  const selectedFile=matchingFiles[0] ?? null;
  const uploadedByName=selectedFile?.customer?.name || 'de klant';
- const runCalculation=async(file:File,next=overrides)=>{setCalculating(true);try{const rows=parseCsvToRawTransactions(await file.text());if(!rows.length)throw new Error('Geen transacties uit het CSV-bestand kunnen worden gelezen.');setRawTransactions(rows);setReport(calculateFiscalVatReport(rows,next))}catch(e){push('error',e instanceof Error?e.message:'BTW-berekening mislukt.')}finally{setCalculating(false)}};
+ const runCalculation=async(file:File,next=overrides)=>{setCalculating(true);try{const rows=parseCsvToRawTransactions(await file.text());if(!rows.length)throw new Error('Geen transacties uit het CSV-bestand kunnen worden gelezen.');const enrichedRows=await enrichVatTransactions(rows);setRawTransactions(enrichedRows);setReport(calculateFiscalVatReport(enrichedRows,next))}catch(e){push('error',e instanceof Error?e.message:'BTW-berekening mislukt.')}finally{setCalculating(false)}};
  const selectAndCalculate=async()=>{if(!matchingFiles.length){push('error',`Geen bestand gevonden voor ${quarter} ${year}.`);return}try{const f=matchingFiles[0];const view=await api.userFileView(f.id);const response=await fetch(view.url);if(!response.ok)throw new Error('Bestand kon niet worden opgehaald.');await runCalculation(new File([await response.blob()],f.original_name,{type:f.mime_type||'text/csv'}))}catch(e){push('error',e instanceof Error?e.message:'Bestand kon niet worden opgehaald.')}};
  const applyReview=(id:string,option:typeof FISCAL_CLASSIFICATION_OPTIONS[number])=>{const name=reviewer.trim();if(!name){push('error','Vul eerst de naam van de boekhouder in.');return}const next={...overrides,[id]:{classificatie:option.value,beoordeeld_door:name,...(option.percentage===undefined?{}:{percentage:option.percentage})}};setOverrides(next);setReport(calculateFiscalVatReport(rawTransactions,next))};
  const columns=report?tweeKolommenWeergave(report):{zeker:[],twijfelgevallen:[]};
