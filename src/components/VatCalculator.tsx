@@ -10,12 +10,23 @@ import { Calculator, AlertTriangle, CheckCircle2, TrendingDown, TrendingUp, Arro
 import type { FileRow } from '@/types';
 
 const QUARTERS = ['Q1','Q2','Q3','Q4'] as const;
-const eur=(n:number)=>new Intl.NumberFormat('nl-NL',{style:'currency',currency:'EUR'}).format(n);
-const RUBRIEKEN=['1a','1b','1c','1d','1e','2a','3a','3b','4a','4b','5a','5b'] as const;
+const eur = (n:number) => new Intl.NumberFormat('nl-NL',{style:'currency',currency:'EUR'}).format(n);
+const RUBRIEKEN = ['1a','1b','1c','1d','1e','2a','3a','3b','4a','4b','5a','5b'] as const;
+const typeLabel = (type: RawTransaction['type']) => type === 'income' ? 'Omzet' : 'Inkoop';
 
 export function VatCalculator({customerId}:{customerId:string}) {
- const {push}=useToast(); const [year,setYear]=useState(new Date().getFullYear()); const [quarter,setQuarter]=useState<string>('Q1'); const [files,setFiles]=useState<FileRow[]>([]); const [loading,setLoading]=useState(true); const [calculating,setCalculating]=useState(false); const [report,setReport]=useState<FiscalReport|null>(null); const [rawTransactions,setRawTransactions]=useState<RawTransaction[]>([]); const [overrides,setOverrides]=useState<Record<string,BoekhouderBeoordeling>>({}); const [reviewer,setReviewer]=useState('');
- const loadFiles=useCallback(async()=>{setLoading(true);try{setFiles((await api.dossierUploads(customerId)).files)}catch{push('error','Uploads konden niet worden geladen.')}finally{setLoading(false)}},[customerId,push]); useEffect(()=>{loadFiles()},[loadFiles]);
+ const {push}=useToast();
+ const [year,setYear]=useState(new Date().getFullYear());
+ const [quarter,setQuarter]=useState<string>('Q1');
+ const [files,setFiles]=useState<FileRow[]>([]);
+ const [loading,setLoading]=useState(true);
+ const [calculating,setCalculating]=useState(false);
+ const [report,setReport]=useState<FiscalReport|null>(null);
+ const [rawTransactions,setRawTransactions]=useState<RawTransaction[]>([]);
+ const [overrides,setOverrides]=useState<Record<string,BoekhouderBeoordeling>>({});
+ const [reviewer,setReviewer]=useState('');
+ const loadFiles=useCallback(async()=>{setLoading(true);try{setFiles((await api.dossierUploads(customerId)).files)}catch{push('error','Uploads konden niet worden geladen.')}finally{setLoading(false)}},[customerId,push]);
+ useEffect(()=>{loadFiles()},[loadFiles]);
  const matchingFiles=useMemo(()=>files.filter(f=>f.category==='income_overview'&&(!f.quarter||String(f.quarter).toUpperCase()===quarter)&&(!f.year||f.year===year)&&(/\.(csv|txt)$/i.test(f.original_name))),[files,quarter,year]);
  const selectedFile=matchingFiles[0] ?? null;
  const uploadedByName=selectedFile?.customer?.name || 'de klant';
@@ -39,7 +50,7 @@ export function VatCalculator({customerId}:{customerId:string}) {
     <div className="mt-5 rounded-xl border p-5"><div className="flex justify-between items-center"><div className="flex gap-2 items-center"><ArrowDownUp className="h-5 w-5"/><div><div className="text-xs font-bold uppercase">{report.overzicht.status==='af_te_dragen'?'Af te dragen':'Terug te vorderen'}</div><div className="font-bold">{report.overzicht.status==='af_te_dragen'?'Aan Belastingdienst':'Van Belastingdienst'}</div></div></div><div className="text-2xl font-extrabold">{eur(Math.abs(report.overzicht.netto))}</div></div><pre className="mt-4 rounded-lg bg-ink-50 p-4 text-xs whitespace-pre-wrap">{eur(report.aangifte['5a'])} verschuldigde btw\n− {eur(report.aangifte['5b'])} aftrekbare voorbelasting\n= {report.overzicht.netto>=0?eur(report.overzicht.netto)+' af te dragen':'−'+eur(Math.abs(report.overzicht.netto))+' terug te vorderen'}</pre></div></div>
    {columns.twijfelgevallen.length>0&&<div className="card overflow-hidden border-warning-200"><div className="p-4 bg-warning-50"><h3 className="font-semibold flex gap-2"><AlertTriangle className="h-4 w-4"/> Alleen uitzonderingen ter beoordeling ({columns.twijfelgevallen.length})</h3><p className="text-xs mt-1">De engine heeft deze transacties niet zelfstandig kunnen koppelen aan een voldoende specifieke Nederlandse btw-regel. Alleen deze uitzonderingen vragen beoordeling; automatisch herkende transacties zijn al verwerkt.</p><div className="mt-3 flex items-center gap-2"><UserCheck className="h-4 w-4"/><input value={reviewer} onChange={e=>setReviewer(e.target.value)} placeholder="Naam boekhouder" className="input max-w-xs"/></div></div><div className="overflow-x-auto"><table className="w-full text-xs"><tbody>{columns.twijfelgevallen.map(row=><tr key={row.transactie_id} className="border-t"><td className="p-3">{row.omschrijving}</td><td className="p-3 text-right">{row.bedrag}</td><td className="p-3">{row.toegepaste_regel}</td><td className="p-3 min-w-[320px]"><select className="input w-full" defaultValue="" onChange={e=>{const [value,percentage]=e.target.value.split('|');if(value){const option=FISCAL_CLASSIFICATION_OPTIONS.find(o=>o.value===value&&String(o.percentage??'')===percentage);if(option)applyReview(row.transactie_id,option)}}}><option value="">Kies fiscale behandeling…</option>{FISCAL_CLASSIFICATION_OPTIONS.map((o,i)=><option key={`${o.value}-${o.percentage}-${i}`} value={`${o.value}|${o.percentage??''}`}>{o.label} — rubriek {o.sections}</option>)}</select></td></tr>)}</tbody></table></div></div>}
    <div className="card overflow-hidden"><div className="p-4 bg-ink-50"><h3 className="font-semibold">Aangiftecontrole</h3><p className="text-xs text-ink-500">1c en 1d worden alleen via expliciete fiscale correcties verwerkt. 5a is de som van verschuldigde btw; 5b is de aftrekbare voorbelasting. Controleer bij 3b ook de ICP-verplichtingen.</p></div><div className="grid md:grid-cols-3 gap-3 p-4 text-xs">{RUBRIEKEN.map(k=><div key={k} className="rounded border p-3"><b>Rubriek {k}</b>{k==='5a'?<div>BTW: {eur(report.aangifte[k])}</div>:k==='5b'?<div>Voorbelasting: {eur(report.aangifte[k])}</div>:<><div>Grondslag: {eur(report.aangifte[k].grondslag)}</div><div>BTW: {eur(report.aangifte[k].btw)}</div></>}</div>)}</div></div>
-   <div className="card overflow-hidden"><div className="p-4 bg-ink-50"><h3 className="font-semibold">Verwerkte transacties ({columns.zeker.length})</h3></div><div className="overflow-x-auto"><table className="w-full text-xs"><tbody>{columns.zeker.map(row=><tr key={row.transactie_id} className="border-t"><td className="p-3">{row.omschrijving}</td><td className="p-3">{row.type}</td><td className="p-3">{row.btw}</td><td className="p-3">{row.bedrag}</td><td className="p-3">{row.toegepaste_regel}</td></tr>)}</tbody></table></div></div>
+   <div className="card overflow-hidden"><div className="p-4 bg-ink-50"><h3 className="font-semibold">Verwerkte transacties ({columns.zeker.length})</h3></div><div className="overflow-x-auto"><table className="w-full text-xs"><tbody>{columns.zeker.map(row=><tr key={row.transactie_id} className="border-t"><td className="p-3">{row.omschrijving}</td><td className="p-3">{typeLabel(row.type)}</td><td className="p-3">{row.btw}</td><td className="p-3">{row.bedrag}</td><td className="p-3">{row.toegepaste_regel}</td></tr>)}</tbody></table></div></div>
   </div>}
  </div>;
 }
