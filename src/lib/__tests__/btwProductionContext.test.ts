@@ -18,6 +18,9 @@ const rows: RawTransaction[] = [
   { id:'postnl', type:'expense', amount_incl:121, description:'PostNL Pakketten' },
   { id:'lawyer', type:'expense', amount_incl:121, description:'Advocatenkantoor Meijer' },
   { id:'pathe-plain', type:'expense', amount_incl:109, description:'Pathé' },
+  { id:'cafe', type:'expense', amount_incl:423.50, description:'Café De Hoek' },
+  { id:'grand-cafe', type:'expense', amount_incl:67.50, description:'Grand Café De Brasserie' },
+  { id:'didi-talks', type:'expense', amount_incl:605, description:'Didi Talks NL' },
   { id:'generic-foreign', type:'expense', amount_incl:100, description:'Software subscription', tegenrekening_iban:'DE12345678901234567890' },
   { id:'openai-nl', type:'expense', amount_incl:121, description:'OpenAI LLC', tegenrekening_iban:'NL1234567890123456' },
 ];
@@ -48,11 +51,12 @@ assert(byId('kvk').vat.status === 'known' && byId('kvk').vat.rate === 0, 'KVK-in
 assert(byId('postnl').classification === 'domestic_input_21', 'PostNL Pakketten moet als duidelijke Nederlandse 21%-dienst worden herkend.');
 assert(byId('lawyer').classification === 'domestic_input_21', 'Een advocatenkantoor moet als duidelijke Nederlandse 21%-dienst worden herkend.');
 assert(byId('pathe-plain').classification === 'domestic_input_9', 'Plain Pathé moet via merchantcontext automatisch als bioscoop/9% worden herkend.');
-assert(byId('generic-foreign').classification === 'unresolved', 'Een generieke buitenlandse softwareomschrijving mag niet automatisch worden verlegd.');
-assert(byId('openai-nl').classification === 'unresolved', 'Een bekende buitenlandse leverancier met een Nederlandse IBAN mag niet automatisch als buitenlandse verlegging worden behandeld.');
 
-assert(report.audit.unresolved === 2, 'Alleen de twee bewust onvoldoende bewezen buitenlandse gevallen mogen unresolved blijven.');
+for (const id of ['cafe','grand-cafe','didi-talks','generic-foreign','openai-nl']) {
+  assert(byId(id).classification === 'unresolved', `${id} moet unresolved blijven zolang de bankomschrijving de exacte fiscale behandeling niet voldoende bewijst.`);
+}
+assert(report.audit.unresolved === 5, 'Alleen de vijf bewust onvoldoende bewezen transacties mogen unresolved blijven.');
 assert(report.aangifte['4a'].grondslag === 600 && report.aangifte['4a'].btw === 126, 'Niet-EU verlegging moet onafhankelijk op 4a worden opgeteld.');
 assert(report.aangifte['4b'].grondslag === 300 && report.aangifte['4b'].btw === 63, 'EU verlegging moet onafhankelijk op 4b worden opgeteld.');
 assert(report.aangifte['5b'] === 240, 'Aftrekbare verlegde btw plus binnenlandse aftrekbare btw moet correct worden opgeteld.');
-console.log('OK: production supplier context, EU/non-EU reverse charge, medical exemption, KVK fee, PostNL parcel service, accented Pathé recognition and fail-closed generic foreign service checks.');
+console.log('OK: production supplier context, EU/non-EU reverse charge, medical exemption, KVK fee, PostNL parcel service, accented Pathé recognition and fail-closed ambiguous cases.');
