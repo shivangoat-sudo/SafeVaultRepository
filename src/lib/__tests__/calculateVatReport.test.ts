@@ -15,7 +15,26 @@ const report=calculateFiscalVatReport(rows,overrides);
 assert(report.aangifte['1a'].btw===21,`1a moet €21 zijn, kreeg ${report.aangifte['1a'].btw}`);assert(report.aangifte['1b'].btw===9,`1b moet €9 zijn, kreeg ${report.aangifte['1b'].btw}`);assert(report.aangifte['4b'].btw===30,`4b moet €30 zijn, kreeg ${report.aangifte['4b'].btw}`);assert(report.aangifte['5b']===60,`5b moet €60 zijn, kreeg ${report.aangifte['5b']}`);assert(report.aangifte['5a']===60,`5a moet €60 zijn, kreeg ${report.aangifte['5a']}`);assert(report.overzicht.netto===0,`netto moet €0 zijn, kreeg ${report.overzicht.netto}`);assert(report.audit.unresolved===0&&report.audit.included===rows.length,'Alle expliciet bevestigde transacties moeten worden meegenomen.');
 const merchantNamedTotaal=calculateFiscalVatReport([{id:'merchant-totaal',amount_incl:121,type:'income',description:'Totaal Energie'}],{'merchant-totaal':review('domestic_output_21')});assert(merchantNamedTotaal.audit.ignored===0,'Een echte merchantnaam die met Totaal begint mag niet als samenvattingsregel worden genegeerd.');assert(merchantNamedTotaal.aangifte['1a'].btw===21,'Totaal Energie moet als echte 21%-transactie worden verwerkt.');
 const oneC=calculateFiscalVatReport([{id:'sports',amount_incl:113,type:'income',description:'Sportkantine forfait'}],{sports:review('other_rate_output',13)});assert(oneC.aangifte['1c'].btw===13,`1c 13%-forfait moet €13 zijn, kreeg ${oneC.aangifte['1c'].btw}`);
+
+// De engine moet zelf duidelijke Nederlandse transactiebeschrijvingen kunnen
+// herkennen, zonder dat voor iedere rij een boekhouderoverride nodig is.
+const smart=calculateFiscalVatReport([
+  {id:'smart-consultancy',amount_incl:1210,type:'income',description:'Factuur consultancy advies'},
+  {id:'smart-kpn',amount_incl:121,type:'expense',description:'KPN zakelijk abonnement'},
+  {id:'smart-ns',amount_incl:109,type:'expense',description:'NS Zakelijk reis naar klant'},
+]);
+assert(smart.transactions[0].classification==='domestic_output_21'&&smart.transactions[0].vat.status==='known','Duidelijke consultancy-omzet moet automatisch als 21% worden herkend.');
+assert(smart.transactions[1].classification==='domestic_input_21'&&smart.transactions[1].vat.status==='known','Duidelijke Nederlandse telecomuitgave moet automatisch als 21% worden herkend.');
+assert(smart.transactions[2].classification==='domestic_input_9'&&smart.transactions[2].vat.status==='known','Zakelijke NS-transactie moet automatisch als 9% worden herkend.');
+assert(smart.audit.included===3&&smart.audit.unresolved===0,'Duidelijk herkenbare transacties mogen niet onnodig als unresolved eindigen.');
+
+// Een buitenlandse IBAN alleen is nooit voldoende om 4a/4b reverse charge te
+// concluderen. Zonder expliciet verleggingssignaal blijft zo\'n transactie open.
+const foreignService=calculateFiscalVatReport([{id:'foreign-service',amount_incl:121,type:'expense',description:'Software subscription',tegenrekening_iban:'DE12345678901234567890'}]);
+assert(foreignService.transactions[0].classification==='unresolved','Buitenlandse IBAN + algemene serviceomschrijving mag niet automatisch reverse charge worden.');
+assert(foreignService.aangifte['4a'].btw===0&&foreignService.aangifte['4b'].btw===0,'Onbewezen buitenlandse verlegging mag niet automatisch in 4a/4b terechtkomen.');
+
 let threw=false;try{calculateFiscalVatReport([{id:'bad-1c',amount_incl:105,type:'income',description:'Onbekend overig tarief'}],{'bad-1c':review('other_rate_output',5)});}catch{threw=true}assert(threw,'Een willekeurig 1c-tarief moet worden geweigerd.');
 threw=false;try{calculateFiscalVatReport([{id:'bad',amount_incl:121,type:'expense'}],{bad:review('domestic_output_21')});}catch{threw=true}assert(threw,'Een omzetclassificatie op een expense-transactie moet worden geweigerd.');
 threw=false;try{calculateFiscalVatReport([{id:'dup',amount_incl:121,type:'income'},{id:'dup',amount_incl:109,type:'income'}]);}catch{threw=true}assert(threw,'Dubbele transactie-ID moet worden geweigerd.');
-console.log('OK: veilige fiscale rapportage, unresolved fail-closed, Nederlandse 1c-policy, merchant-summary safety, verlegging 9/21%, classificatievalidatie en reconciliatie.');
+console.log('OK: veilige fiscale rapportage, slimme transactieclassificatie, unresolved fail-closed, Nederlandse 1c-policy, merchant-summary safety, verlegging 9/21%, classificatievalidatie en reconciliatie.');
