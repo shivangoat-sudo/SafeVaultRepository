@@ -59,7 +59,7 @@ assert(dutchRules.transactions.every(tx=>tx.vat.status==='known'&&tx.includedInT
 assert(dutchRules.transactions[0].rule.wetsbasis.includes('Tabel I'),'De toegepaste 9%-regel moet de wettelijke basis tonen.');
 
 // Als 9% en 21% signalen beide voorkomen, geldt de afgesproken bankregel: 21%.
-const mixed=calculateFiscalVatReport([{id:'mixed',amount_incl:121,type:'expense',description:'Supermarkt voedsel en alcohol'}]);
+const mixed=calculateFiscalVatReport([{id:'mixed',amount_incl:121,type:'expense',description:'Supermarkt eten en alcohol'}]);
 assert(mixed.transactions[0].classification==='domestic_input_21','Een omschrijving met zowel 9%- als 21%-signalen moet volgens de productpolicy 21% worden.');
 assert(mixed.audit.unresolved===0,'Een gemengde 9%/21%-omschrijving mag niet naar de boekhouder worden doorgeschoven.');
 
