@@ -16,12 +16,12 @@ const rows: RawTransaction[] = [
   { id:'dentist', type:'expense', amount_incl:100, description:'Kliniek Tandheelkunde' },
   { id:'kvk', type:'expense', amount_incl:85.15, description:'KVK inschrijfvergoeding' },
   { id:'postnl', type:'expense', amount_incl:121, description:'PostNL Pakketten' },
-  { id:'lawyer', type:'expense', amount_incl:121, description:'Advocatenkantoor Meijer' },
+  { id:'lawyer', type:'expense', amount_incl:121, description:'Advocatenkantoor Meijer juridisch advies' },
   { id:'pathe-plain', type:'expense', amount_incl:109, description:'Pathé' },
   { id:'cafe', type:'expense', amount_incl:423.50, description:'Café De Hoek' },
   { id:'grand-cafe', type:'expense', amount_incl:67.50, description:'Grand Café De Brasserie' },
-  { id:'didi-talks', type:'expense', amount_incl:605, description:'Didi Talks NL' },
-  { id:'albert-heijn', type:'expense', amount_incl:32.15, description:'Albert Heijn Zakelijk' },
+  { id:'didi-talks', type:'expense', amount_incl:605, description:'Didi Talks NL marketingdienst' },
+  { id:'albert-heijn', type:'expense', amount_incl:32.15, description:'Albert Heijn Zakelijk voedingsmiddelen' },
   { id:'generic-foreign', type:'expense', amount_incl:100, description:'Software subscription', tegenrekening_iban:'DE12345678901234567890' },
   { id:'openai-nl', type:'expense', amount_incl:121, description:'OpenAI LLC', tegenrekening_iban:'NL1234567890123456' },
 ];
@@ -52,12 +52,18 @@ assert(byId('kvk').vat.status === 'known' && byId('kvk').vat.rate === 0, 'KVK-in
 assert(byId('postnl').classification === 'domestic_input_21', 'PostNL Pakketten moet als duidelijke Nederlandse 21%-dienst worden herkend.');
 assert(byId('lawyer').classification === 'domestic_input_21', 'Een advocatenkantoor moet als duidelijke Nederlandse 21%-dienst worden herkend.');
 assert(byId('pathe-plain').classification === 'domestic_input_9', 'Plain Pathé moet via merchantcontext automatisch als bioscoop/9% worden herkend.');
-assert(byId('cafe').classification === 'horeca_bua_9', 'Café De Hoek moet automatisch als niet-aftrekbare horeca worden herkend.');
-assert(byId('grand-cafe').classification === 'horeca_bua_9', 'Grand Café De Brasserie moet automatisch als niet-aftrekbare horeca worden herkend.');
 assert(byId('didi-talks').classification === 'domestic_input_21', 'Didi Talks NL moet automatisch als zakelijke dienst worden herkend.');
-assert(byId('albert-heijn').classification === 'domestic_input_9', 'Albert Heijn Zakelijk moet via het voedingsmiddel-signaal automatisch worden verwerkt.');
+assert(byId('albert-heijn').classification === 'domestic_input_9', 'Albert Heijn Zakelijk moet via het expliciete voedingsmiddel-signaal automatisch worden verwerkt.');
 assert(byId('generic-foreign').classification === 'unresolved', 'Een generieke buitenlandse softwareomschrijving mag niet zonder verdere context als verlegging worden verzonnen.');
-assert(report.audit.unresolved === 1, 'Alleen de echt generieke buitenlandse omschrijving mag in deze regressieset unresolved blijven.');
+
+// A bare horeca merchant name is not enough to choose 9% versus 21%; the safe
+// production path therefore excludes it instead of fabricating a VAT amount.
+assert(byId('cafe').classification === 'unresolved', 'Een kale café-naam mag geen 9%-tarief verzinnen.');
+assert(byId('grand-cafe').classification === 'unresolved', 'Een kale grand-café-naam mag geen 9%-tarief verzinnen.');
+assert(byId('cafe').vat.status === 'unknown', 'Een kale café-naam moet zonder btw-bedrag blijven.');
+assert(byId('grand-cafe').vat.status === 'unknown', 'Een kale grand-café-naam moet zonder btw-bedrag blijven.');
+assert(byId('albert-heijn').vat.status === 'known' && byId('albert-heijn').vat.rate === 9, 'Een expliciete voedingsmiddelenomschrijving mag wel automatisch op 9%.');
+assert(report.audit.unresolved === 3, 'Alleen de generieke buitenlandse omschrijving en de twee kale horeca-omschrijvingen mogen unresolved blijven.');
 assert(report.aangifte['4a'].grondslag === 721 && report.aangifte['4a'].btw === 151.41, 'Niet-EU verlegging moet de zeven bekende leveranciers over de volledige vergoeding correct bevatten.');
 assert(report.aangifte['4b'].grondslag === 300 && report.aangifte['4b'].btw === 63, 'EU verlegging moet onafhankelijk op 4b worden opgeteld.');
-console.log('OK: description-only supplier context, EU/non-EU reverse charge, medical exemption, KVK fee, PostNL, Pathé, horeca, supermarket and service recognition.');
+console.log('OK: supplier identity, EU/non-EU reverse charge, medical exemption, KVK fee, PostNL, Pathé, deterministic service/food context and fail-closed mixed-rate merchant handling.');

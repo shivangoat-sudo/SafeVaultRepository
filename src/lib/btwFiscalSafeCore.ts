@@ -20,82 +20,36 @@ const euros=(c:number)=>c/100; const add=(a:number,b:number)=>euros(cents(a)+cen
 const reverse=(x:FiscalClassification)=>x==='domestic_reverse_charge'||x==='eu_reverse_charge'||x==='non_eu_reverse_charge';
 const deductible=(x:FiscalClassification)=>x==='domestic_input_21'||x==='domestic_input_9'||reverse(x);
 const EU=new Set(['AT','BE','BG','CY','CZ','DE','DK','EE','ES','FI','FR','GR','HR','HU','IE','IT','LT','LU','LV','MT','NL','PL','PT','RO','SE','SI','SK']);
-const SUMMARY_TERMS=/\b(subtotaal|eindtotaal|eindsaldo|jaaroverzicht|kwartaaltotaal|maandtotaal|btw totaal|btw-totaal|totale btw|voorbelasting totaal|te betalen btw|terug te vorderen btw|grand total|samenvatting)\b/i;
+const SUMMARY_TERMS=/\b(subtotaal|eindtotaal|eindsaldo|jaaroverzicht|kwartaaltotaal|maandtotaal|btw totaal|totaal btw|btw-totaal|totale btw|voorbelasting totaal|totaal voorbelasting|te betalen btw|terug te vorderen btw|grand total|samenvatting)\b/i;
 function isSummary(t:RawTransaction){const text=norm(`${t.description} ${t.memo}`);if(SUMMARY_TERMS.test(text))return true;const first=norm(t.description).split(' ')[0]??'';return first==='totaal'||first==='saldo'||first==='eindtotaal';}
 function section(x:FiscalClassification):FiscalSection { if(x==='domestic_output_21')return'1a';if(x==='domestic_output_9')return'1b';if(x==='other_rate_output')return'1c';if(x==='private_use_adjustment')return'1d';if(x==='zero_rated_output'||x==='exempt_output')return'1e';if(x==='domestic_reverse_charge')return'2a';if(x==='non_eu_output_0')return'3a';if(x==='eu_output_0')return'3b';if(x==='non_eu_reverse_charge')return'4a';if(x==='eu_reverse_charge')return'4b';if(x.startsWith('domestic_input_')||x.startsWith('non_deductible_input_')||x==='horeca_bua_9'||x==='zero_rated_input'||x==='exempt_input')return'5b';return'geen'; }
 function rule(x:FiscalClassification):FiscalRule { const s=section(x);const explanation:Record<FiscalSection,string>={'1a':'Binnenlandse omzet belast tegen 21% (Wet OB 1968, art. 9 lid 1).','1b':'Binnenlandse omzet belast tegen 9% indien de prestatie onder Tabel I valt (Wet OB 1968, art. 9 lid 2).','1c':'Overig tarief; alleen gebruiken voor een expliciete fiscale correctie, zoals het 13%-forfait voor sportkantines.','1d':'Privégebruik; alleen via een expliciete fiscale correctie.','1e':'0%-tarief of vrijstelling; de wettelijke voorwaarden bepalen de behandeling.','2a':'Binnenlandse verlegging; verschuldigde en aftrekbare btw worden afzonderlijk verwerkt waar aftrek is toegestaan.','3a':'Uitvoer buiten de EU; 0% alleen indien aan de voorwaarden voor uitvoer is voldaan.','3b':'Intracommunautaire levering/dienst; voorwaarden en ICP-verplichtingen moeten kloppen.','4a':'Inkoop buiten de EU met verlegging.','4b':'Inkoop uit de EU met verlegging.','5a':'Totaal verschuldigde btw.','5b':'Voorbelasting; aftrek alleen voor zover wettelijk toegestaan.','geen':'Geen financiële btw-post.'};return{classification:x,section:s,wetsbasis:`Btw-aangifte rubriek ${s==='geen'?'—':s}`,explanation:explanation[s],requiresEvidence:false}; }
 type ClassificationHit={x:FiscalClassification;reason:string;confidence:'high'|'low';p?:number};
-
 const NL_SERVICE_21=/\b(consultancy|consultant|adviesbureau|adviesdiensten|accountancy|accountant|boekhoud(?:ing|er)|administratiekantoor|juridisch advies|advocaat|notaris|marketing|reclame|advertising|webdesign|website|webhosting|hosting|softwareontwikkeling|ict[- ]?(?:dienst|diensten|beheer)|it[- ]?(?:dienst|diensten|support)|cloud[- ]?(?:dienst|diensten)|saas|logistiek|transportdienst|vrachtvervoer|installatie|onderhoudscontract|reparatiebedrijf|drukwerk|drukkerij)\b/i;
 const NL_SERVICE_9=/\b(kapper|kapsalon|fietsenmaker|fietsreparatie|fiets reparatie|schoenenreparatie|schoenmaker|kledingreparatie|personenvervoer|taxi|openbaar vervoer|ov[- ]?chipkaart|treinreis|busreis|tramreis|metroreis|boek|boeken|tijdschrift|periodiek|e[- ]?boek)\b/i;
 const EXEMPT_SERVICE=/\b(verzekeringspremie|verzekering premie|zorgverzekering|bankrente|rente|medische behandeling|tandartsbehandeling|tandheelkundige behandeling)\b/i;
 const DOMESTIC_21_MERCHANT=/\b(kpn|vodafone|odido|ziggo|transip|exact online|afas|staples nederland|schoonmaakbedrijf)\b/i;
 const DOMESTIC_9_MERCHANT=/\b(ns zakelijk|nederlandse spoorwegen|arriva|ret|gvb|connexxion)\b/i;
-
 function domesticContext(tx:RawTransaction){const country=String(tx.tegenrekening_iban??'').replace(/\s/g,'').toUpperCase().slice(0,2);return !country||country==='NL';}
-
 function classifyFromText(tx:RawTransaction):ClassificationHit|null {
   const text=norm(`${tx.description} ${tx.memo}`);
   if(!text)return null;
-
-  if(/\b(priv[eé](?:-opname| opname)?|priveopname|prive storting|privestorting)\b/i.test(text))
-    return{x:'private_no_vat',reason:'Privétransactie herkend; geen btw-prestatie.',confidence:'high'};
-
-  if(tx.type==='expense'&&/\b(belastingdienst|belastingaanslag|inkomstenbelasting|loonheffing|premie volksverzekering)\b/i.test(text))
-    return{x:'private_no_vat',reason:'Belastingbetaling herkend; dit is geen btw op een inkoop.',confidence:'low'};
-
-  if(tx.type==='expense'&&/\b(bankkosten|bank fee|rekeningkosten|betaalrekening|overboekingkosten)\b/i.test(text))
-    return{x:'exempt_input',reason:'Betalingsverkeer/bankkosten herkend; financiële dienstverlening is vaak van btw vrijgesteld.',confidence:'low'};
-
-  if(/\b(export|uitvoer|exporteren)\b/i.test(text)&&tx.type==='income')
-    return{x:'non_eu_output_0',reason:'Uitvoer-signaal gevonden; 0% alleen toepassen als de wettelijke uitvoervoorwaarden zijn vervuld.',confidence:'low'};
-
-  if(/\b(vrijgesteld|vrijstelling|btw-vrij|zonder btw wegens vrijstelling)\b/i.test(text))
-    return{x:tx.type==='income'?'exempt_output':'exempt_input',reason:'Expliciete vermelding van vrijstelling.',confidence:'high'};
-
+  if(/\b(priv[eé](?:-opname| opname)?|priveopname|prive storting|privestorting)\b/i.test(text))return{x:'private_no_vat',reason:'Privétransactie herkend; geen btw-prestatie.',confidence:'high'};
+  if(tx.type==='expense'&&/\b(belastingdienst|belastingaanslag|inkomstenbelasting|loonheffing|premie volksverzekering)\b/i.test(text))return{x:'private_no_vat',reason:'Belastingbetaling herkend; dit is geen btw op een inkoop.',confidence:'low'};
+  if(tx.type==='expense'&&/\b(bankkosten|bank fee|rekeningkosten|betaalrekening|overboekingkosten)\b/i.test(text))return{x:'exempt_input',reason:'Betalingsverkeer/bankkosten herkend; financiële dienstverlening is vaak van btw vrijgesteld.',confidence:'low'};
+  if(/\b(export|uitvoer|exporteren)\b/i.test(text)&&tx.type==='income')return{x:'non_eu_output_0',reason:'Uitvoer-signaal gevonden; 0% alleen toepassen als de wettelijke uitvoervoorwaarden zijn vervuld.',confidence:'low'};
+  if(/\b(vrijgesteld|vrijstelling|btw-vrij|zonder btw wegens vrijstelling)\b/i.test(text))return{x:tx.type==='income'?'exempt_output':'exempt_input',reason:'Expliciete vermelding van vrijstelling.',confidence:'high'};
   const pct0=/(^|[^0-9])0\s*%([^0-9]|$)/.test(text),pct9=/(^|[^0-9])9\s*%([^0-9]|$)/.test(text),pct21=/(^|[^0-9])21\s*%([^0-9]|$)/.test(text);
-
-  if(/\b(btw verlegd|btw-verlegd|verlegde btw|reverse charge)\b/i.test(text)){
-    const country=String(tx.tegenrekening_iban??'').replace(/\s/g,'').toUpperCase().slice(0,2);
-    if(country&&/^[A-Z]{2}$/.test(country))
-      return{x:country==='NL'?'domestic_reverse_charge':EU.has(country)?'eu_reverse_charge':'non_eu_reverse_charge',reason:`Expliciet verleggingssignaal met landcode ${country}.`,confidence:'high'};
-  }
-
+  if(/\b(btw verlegd|btw-verlegd|verlegde btw|reverse charge)\b/i.test(text)){const country=String(tx.tegenrekening_iban??'').replace(/\s/g,'').toUpperCase().slice(0,2);if(country&&/^[A-Z]{2}$/.test(country))return{x:country==='NL'?'domestic_reverse_charge':EU.has(country)?'eu_reverse_charge':'non_eu_reverse_charge',reason:`Expliciet verleggingssignaal met landcode ${country}.`,confidence:'high'};}
   if(pct0)return{x:tx.type==='income'?'zero_rated_output':'zero_rated_input',reason:'Expliciet 0%-tarief in de bankomschrijving.',confidence:'high'};
   if(pct9)return{x:tx.type==='income'?'domestic_output_9':'domestic_input_9',reason:'Expliciet 9%-tarief in de bankomschrijving.',confidence:'high'};
   if(pct21)return{x:tx.type==='income'?'domestic_output_21':'domestic_input_21',reason:'Expliciet 21%-tarief in de bankomschrijving.',confidence:'high'};
-
-  if(EXEMPT_SERVICE.test(text))
-    return{x:tx.type==='income'?'exempt_output':'exempt_input',reason:'De omschrijving noemt een dienst die in de genoemde vorm onder een btw-vrijstelling kan vallen.',confidence:'low'};
-
-  // Duidelijke Nederlandse 9%-prestaties uit Tabel I. Deze regels gebruiken
-  // uitsluitend de omschrijving en worden niet toegepast wanneer de IBAN een
-  // buitenlands land aanduidt. Voor voorbelasting blijft de zakelijke context
-  // bepalend; de omschrijving is hier alleen voldoende voor het tarief.
-  if(domesticContext(tx)&&NL_SERVICE_9.test(text))
-    return{x:tx.type==='income'?'domestic_output_9':'domestic_input_9',reason:'De omschrijving wijst op een herkenbare Nederlandse 9%-prestatie uit Tabel I.',confidence:'high'};
-
-  // De hoofdregel is 21%. Voor duidelijk herkenbare Nederlandse zakelijke
-  // diensten/leveringen kan de omschrijving daarom automatisch 21% opleveren.
-  // Buitenlandse tegenpartijen worden hier bewust niet automatisch als
-  // reverse charge aangemerkt: alleen een buitenlandse IBAN is daarvoor geen
-  // voldoende fiscale grond.
-  if(domesticContext(tx)&&(NL_SERVICE_21.test(text)||DOMESTIC_21_MERCHANT.test(text)))
-    return{x:tx.type==='income'?'domestic_output_21':'domestic_input_21',reason:'De omschrijving herkent een duidelijke Nederlandse zakelijke prestatie waarop de algemene 21%-regel van toepassing is.',confidence:'high'};
-
-  // Specifieke Nederlandse OV-vervoerders: 9% is het tarief voor personenvervoer.
-  // De aftrekbaarheid hangt wel af van zakelijke reisvoorwaarden; daarom wordt
-  // deze regel alleen automatisch gebruikt wanneer de transactieomschrijving
-  // zelf een zakelijke vervoerscontext bevat.
-  if(domesticContext(tx)&&DOMESTIC_9_MERCHANT.test(text)&&/\b(zakelijk|business|werk|bedrijf|reis|reizen)\b/i.test(text))
-    return{x:tx.type==='income'?'domestic_output_9':'domestic_input_9',reason:'Nederlandse personenvervoer-transactie met zakelijke context; 9%-tarief toegepast.',confidence:'high'};
-
-  // Geen reverse-charge meer op basis van alleen een buitenlandse IBAN plus
-  // een algemeen woord als software/service. Dat kan tot onjuiste 4a/4b-posts
-  // leiden wanneer de leverancier toch Nederlandse btw factureert.
+  if(EXEMPT_SERVICE.test(text))return{x:tx.type==='income'?'exempt_output':'exempt_input',reason:'De omschrijving noemt een dienst die in de genoemde vorm onder een btw-vrijstelling kan vallen.',confidence:'low'};
+  if(domesticContext(tx)&&NL_SERVICE_9.test(text))return{x:tx.type==='income'?'domestic_output_9':'domestic_input_9',reason:'De omschrijving wijst op een herkenbare Nederlandse 9%-prestatie uit Tabel I.',confidence:'high'};
+  if(domesticContext(tx)&&(NL_SERVICE_21.test(text)||DOMESTIC_21_MERCHANT.test(text)))return{x:tx.type==='income'?'domestic_output_21':'domestic_input_21',reason:'De omschrijving herkent een duidelijke Nederlandse zakelijke prestatie waarop de algemene 21%-regel van toepassing is.',confidence:'high'};
+  if(domesticContext(tx)&&DOMESTIC_9_MERCHANT.test(text)&&/\b(zakelijk|business|werk|bedrijf|reis|reizen)\b/i.test(text))return{x:tx.type==='income'?'domestic_output_9':'domestic_input_9',reason:'Nederlandse personenvervoer-transactie met zakelijke context; 9%-tarief toegepast.',confidence:'high'};
   return null;
 }
-
 function classify(tx:RawTransaction):ClassificationHit { const hit=classifyFromText(tx);if(hit)return hit;return{x:'unresolved',reason:'De omschrijving bevat onvoldoende specifieke fiscale informatie om het btw-tarief of de fiscale behandeling veilig vast te stellen.',confidence:'low'}; }
 function overrideClassification(tx:RawTransaction,o:BoekhouderBeoordeling){if(!o.beoordeeld_door?.trim())throw new Error(`BTW safety: beoordelaar ontbreekt voor ${tx.id}.`);const income=new Set<FiscalClassification>(['domestic_output_21','domestic_output_9','other_rate_output','private_use_adjustment','zero_rated_output','exempt_output','eu_output_0','non_eu_output_0']);const expense=new Set<FiscalClassification>(['domestic_input_21','domestic_input_9','non_deductible_input_21','non_deductible_input_9','horeca_bua_9','zero_rated_input','exempt_input','domestic_reverse_charge','eu_reverse_charge','non_eu_reverse_charge','private_no_vat']);if(!(tx.type==='income'?income:expense).has(o.classificatie))throw new Error(`BTW safety: classificatie ${o.classificatie} past niet bij ${tx.type}-transactie ${tx.id}.`);if(o.classificatie==='other_rate_output'&&o.percentage!==13)throw new Error(`BTW safety: rubriek 1c vereist het expliciete 13%-forfait voor ${tx.id}.`);return o.classificatie;}
 function known(tx:RawTransaction,x:FiscalClassification,reason:string,manual:boolean,p?:number,confidence:'high'|'low'='high'):FiscalTransaction { const rate=x==='other_rate_output'?(p??13):x==='domestic_output_21'||x==='domestic_input_21'||x==='non_deductible_input_21'||x==='private_use_adjustment'?21:x==='domestic_output_9'||x==='domestic_input_9'||x==='non_deductible_input_9'||x==='horeca_bua_9'?9:reverse(x)?(p===9?9:21):0;const gross=cents(Math.abs(tx.amount_incl));const vat=rate===0?0:reverse(x)?Math.round(gross*rate/100):Math.round(gross*rate/(100+rate));const base=reverse(x)?gross:gross-vat;const ded=tx.type==='expense'&&deductible(x);const amountIncl=euros(gross);const amountExcl=euros(base);const vatAmount=euros(vat);const appliedRule=rule(x);return{id:tx.id,date:tx.date,description:tx.description,type:tx.type,amount_incl_input:amountIncl,amount_excl:amountExcl,vat:{status:'known',rate,amount:vatAmount},classification:x,section:section(x),deductible:ded,evidenceRequired:false,evidenceStatus:manual?'human_confirmed':'not_required',confidence,includedInTotals:true,reason,rule:appliedRule,transactie_id:tx.id,omschrijving:tx.description??'',bedrag:amountIncl,btw:vatAmount,toegepaste_regel:appliedRule.explanation};}
