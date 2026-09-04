@@ -44,7 +44,7 @@ expect(report.audit.unresolved === 1, `expected exactly 1 unresolved transaction
 const conflictRows = [
   { id: 'conflict-rates', date: '2026-08-01', description: 'Kantoorbenodigdheden voeding 9% 21%', memo: '', type: 'expense' as const, amount_incl: 121 },
   { id: 'conflict-reverse-rate', date: '2026-08-02', description: 'OpenAI LLC btw verlegd 21% 9%', memo: '', type: 'expense' as const, amount_incl: 121 },
-  { id: 'conflict-exempt-taxable', date: '2026-08-03', description: 'Tandarts behandeling 21%', memo: '', type: 'expense' as const, amount_incl: 121 },
+  { id: 'conflict-exempt-taxable', date: '2026-08-03', description: 'Tandarts behandeling vrijgesteld 21%', memo: '', type: 'expense' as const, amount_incl: 121 },
 ];
 const conflictReport = calculateFiscalVatReport(conflictRows);
 for (const id of conflictRows.map((row) => row.id)) {
