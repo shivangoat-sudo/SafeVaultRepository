@@ -4,8 +4,20 @@ import { calculateFiscalVatReport, tweeKolommenWeergave } from '../btwFiscalSafe
 import { parseCsvToRawTransactions } from '../../utils/vatCsvParser';
 import type { RawTransaction } from '../btwSafeTypes';
 
-const expense = (id: string, description: string, amount_incl = 121, memo = ''): RawTransaction => ({ id, type: 'expense', amount_incl, description, memo });
-const income = (id: string, description: string, amount_incl: number, memo = ''): RawTransaction => ({ id, type: 'income', amount_incl, description, memo });
+const expense = (id: string, description: string, amount_incl = 121, memo = ''): RawTransaction => ({
+  id,
+  type: 'expense',
+  amount_incl,
+  description,
+  memo,
+});
+const income = (id: string, description: string, amount_incl: number, memo = ''): RawTransaction => ({
+  id,
+  type: 'income',
+  amount_incl,
+  description,
+  memo,
+});
 
 const adversarialRows: RawTransaction[] = [
   income('a01', 'Verkoop zakelijke dienstverlening', 121),
@@ -93,8 +105,6 @@ assert.equal(report.aangifte['1a'].btw, 0, '1a mag geen onbekende verkoop-btw be
 assert.equal(report.aangifte['1b'].btw, 9, '1b onverwacht gewijzigd.');
 assert.equal(report.aangifte['3a'].btw, 0, '3a moet 0 btw tonen.');
 
-// Customer/import summary rows: they are valid bank rows syntactically but must
-// never be trusted as fiscal facts.
 const csvWithSummary = [
   'Datum;Naam / Omschrijving;Tegenrekening;Af Bij;Bedrag;Mededelingen',
   '2026-01-01;Verkoop boek 9%;NL00TEST;Bij;109,00;factuur 9%',
@@ -107,7 +117,7 @@ assert.equal(parsedSummary.length, 4, 'Alle fysieke bankregels moeten worden gep
 const summaryReport = calculateFiscalVatReport(parsedSummary);
 assert.ok(summaryReport.ignored.length >= 2, 'Samenvattingsregels moeten worden genegeerd voor fiscale totalen.');
 assert.equal(summaryReport.aangifte['1b'].btw, 9, 'Klantberekend totaal mag 1b niet beïnvloeden.');
-assert.equal(summaryReport.aangifte['4a'].btw, 21, 'Werkelijke OpenAI-transactie moet wel worden meegenomen.');
+assert.equal(summaryReport.aangifte['4a'].btw, 25.41, 'Werkelijke OpenAI-verleggingsgrondslag van €121 moet 21% = €25,41 geven.');
 
 const parserCases = [
   ['comma/decimal', 'Date,Description,IBAN,Direction,Amount,Memo\n2026-01-01,Kantoorbenodigdheden,NL00TEST,expense,"1.234,56",zakelijk\n2026-01-02,Verkoop boek 9%,NL00TEST,income,"109,00",9%'],
