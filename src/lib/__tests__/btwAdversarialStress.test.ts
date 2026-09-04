@@ -61,7 +61,7 @@ const view = tweeKolommenWeergave(report);
 // Every row must remain represented; summaries/ambiguities must not silently
 // become fiscal totals, and no known case may be excluded unexpectedly.
 assert.equal(report.transactions.length, adversarialRows.length, 'Elke banktransactie moet zichtbaar blijven in het rapport.');
-assert.ok(report.audit.unresolved >= 4, 'De bewust ambigue combinaties moeten fail-closed blijven.');
+assert.ok(report.audit.unresolved >= 5, 'De bewust ambigue combinaties moeten fail-closed blijven.');
 assert.equal(view.twijfelgevallen.length, report.audit.unresolved, 'Twijfelgevallenweergave moet aansluiten op unresolved.');
 
 const byId = (id: string) => report.transactions.find(tx => tx.id === id)!;
@@ -74,7 +74,6 @@ const expectKnown = (id: string, classification: string, section: string, rate: 
   assert.equal(tx.includedInTotals, true, `${id}: moet in totalen`);
 };
 
-expectKnown('a01', 'domestic_output_21', '1a', 21);
 expectKnown('a02', 'domestic_output_9', '1b', 9);
 expectKnown('a03', 'non_eu_output_0', '3a', 0);
 expectKnown('a04', 'domestic_input_21', '5b', 21);
@@ -100,6 +99,10 @@ expectKnown('a28', 'domestic_input_9', '5b', 9);
 expectKnown('a29', 'domestic_input_21', '5b', 21);
 expectKnown('a30', 'domestic_input_21', '5b', 21);
 
+const ambiguousSale = byId('a01');
+assert.equal(ambiguousSale.vat.status, 'unknown', 'Een kale verkoopomschrijving mag niet automatisch een tarief krijgen.');
+assert.equal(ambiguousSale.includedInTotals, false, 'Een onbepaalbare verkoopregel mag de BTW-totalen niet vervuilen.');
+
 for (const id of ['a13', 'a14', 'a15', 'a16']) {
   const tx = byId(id);
   assert.equal(tx.vat.status, 'unknown', `${id}: ambigue bankdata mag niet gokken`);
@@ -121,14 +124,14 @@ assert.equal(
   report.overzicht.netto,
   'Netto btw moet exact aansluiten op 5a - 5b.',
 );
-assert.equal(report.aangifte['1a'].btw, 21, '1a onverwacht gewijzigd.');
+assert.equal(report.aangifte['1a'].btw, 0, '1a mag geen onbekende verkoop-btw bevatten.');
 assert.equal(report.aangifte['1b'].btw, 9, '1b onverwacht gewijzigd.');
 assert.equal(report.aangifte['3a'].btw, 0, '3a moet 0 btw tonen.');
 
 // Customer/import summary rows: they must not be trusted as fiscal facts.
 const csvWithSummary = [
   'Datum;Naam / Omschrijving;Tegenrekening;Af Bij;Bedrag;Mededelingen',
-  '2026-01-01;Verkoop zakelijke dienstverlening;NL00TEST;Bij;121,00;factuur 21%',
+  '2026-01-01;Verkoop boek 9%;NL00TEST;Bij;109,00;factuur 9%',
   '2026-01-02;TOTAAL BTW 21%;; ;999999,99;door klant berekend',
   '2026-01-03;Totaal incl. BTW;NL00TEST;Af;888888,88;samenvatting',
   '2026-01-04;OpenAI LLC;US00TEST;Af;121,00;software',
@@ -137,7 +140,7 @@ const parsedSummary = parseCsvToRawTransactions(csvWithSummary);
 assert.equal(parsedSummary.length, 4, 'Alle fysieke bankregels moeten worden geparsed.');
 const summaryReport = calculateFiscalVatReport(parsedSummary);
 assert.ok(summaryReport.ignored.length >= 2, 'Samenvattingsregels moeten worden genegeerd voor fiscale totalen.');
-assert.equal(summaryReport.aangifte['1a'].btw, 21, 'Klantberekend totaal mag 1a niet beïnvloeden.');
+assert.equal(summaryReport.aangifte['1b'].btw, 9, 'Klantberekend totaal mag 1b niet beïnvloeden.');
 assert.equal(summaryReport.aangifte['4a'].btw, 21, 'Werkelijke OpenAI-transactie moet wel worden meegenomen.');
 
 // Parser dialects and number formats.
@@ -158,8 +161,8 @@ for (const [label, csv] of parserCases) {
 // quadratic behavior.
 const performanceRows: RawTransaction[] = Array.from({ length: 25_000 }, (_, i) => {
   const n = i % 5;
-  if (n === 0) return income(`p-${i}`, 'Verkoop zakelijke dienstverlening', 121);
-  if (n === 1) return income(`p-${i}`, 'Verkoop boek', 109);
+  if (n === 0) return income(`p-${i}`, 'Verkoop boek 9%', 109);
+  if (n === 1) return income(`p-${i}`, 'Verkoop boek 9%', 109);
   if (n === 2) return expense(`p-${i}`, 'Laptop computer zakelijke aankoop', 121);
   if (n === 3) return expense(`p-${i}`, 'OpenAI LLC', 121);
   return expense(`p-${i}`, 'Salaris medewerker', 2500);
