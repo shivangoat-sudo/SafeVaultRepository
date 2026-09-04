@@ -81,6 +81,46 @@ function maskAmbiguousRows(rows: import('./btwSafeTypes').RawTransaction[]): {
   return { rows: masked, originalTextById };
 }
 
+/**
+ * Some bank descriptions contain an unambiguous insurance-premium signal.
+ * Insurance premiums are VAT-exempt, but other insurer services can be taxable.
+ * We therefore use a strict premium/insurance pattern and mask the raw text
+ * before the generic 21% fallback layer can see the merchant word "verzekering".
+ * The original bank description is restored after fiscal classification.
+ */
+function isClearlyExemptInsurance(row: import('./btwSafeTypes').RawTransaction): boolean {
+  if (row.type !== 'expense') return false;
+  const text = normalizedText(row);
+  if (!text) return false;
+  return /\b(?:verzekeringspremie|verzekering(?:s)?premie|premie\s+(?:verzekering|zorgverzekering|autoverzekering|aansprakelijkheidsverzekering|beroepsaansprakelijkheidsverzekering|rechtsbijstandverzekering|arbeidsongeschiktheidsverzekering|inboedelverzekering|opstalverzekering|reisverzekering)|zorgverzekering|autoverzekering|aansprakelijkheidsverzekering|beroepsaansprakelijkheidsverzekering|rechtsbijstandverzekering|arbeidsongeschiktheidsverzekering|inboedelverzekering|opstalverzekering|reisverzekering)\b/i.test(text);
+}
+
+function maskClearlyExemptInsuranceRows(rows: import('./btwSafeTypes').RawTransaction[]): {
+  rows: import('./btwSafeTypes').RawTransaction[];
+  originalTextById: Map<string, { description?: string; memo?: string }>;
+} {
+  const originalTextById = new Map<string, { description?: string; memo?: string }>();
+  const masked = rows.map((row) => {
+    if (!isClearlyExemptInsurance(row)) return row;
+    originalTextById.set(row.id, { description: row.description, memo: row.memo });
+    return {
+      ...row,
+      description: '[SafeVault: vrijgestelde fiscale premie]',
+      memo: '',
+    };
+  });
+  return { rows: masked, originalTextById };
+}
+
+function mergeOriginalTexts(
+  first: Map<string, { description?: string; memo?: string }>,
+  second: Map<string, { description?: string; memo?: string }>,
+): Map<string, { description?: string; memo?: string }> {
+  const merged = new Map(first);
+  for (const [id, value] of second) merged.set(id, value);
+  return merged;
+}
+
 function restoreOriginalText(
   report: FiscalReport,
   originalTextById: Map<string, { description?: string; memo?: string }>,
@@ -148,7 +188,10 @@ export function calculateFiscalVatReport(
   overrides: Record<string, BoekhouderBeoordeling> = {},
   adjustments: FiscalAdjustments = {},
 ): FiscalReport {
-  const { rows: classifierRows, originalTextById } = maskAmbiguousRows(rows);
+  const ambiguous = maskAmbiguousRows(rows);
+  const insurance = maskClearlyExemptInsuranceRows(ambiguous.rows);
+  const classifierRows = insurance.rows;
+  const originalTextById = mergeOriginalTexts(ambiguous.originalTextById, insurance.originalTextById);
   const report = calculateProductionVatReport(classifierRows, overrides, adjustments);
   const restored = restoreOriginalText({
     ...report,
