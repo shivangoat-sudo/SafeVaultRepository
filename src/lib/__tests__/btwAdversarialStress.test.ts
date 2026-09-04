@@ -61,7 +61,7 @@ const view = tweeKolommenWeergave(report);
 // Every row must remain represented; summaries/ambiguities must not silently
 // become fiscal totals, and no known case may be excluded unexpectedly.
 assert.equal(report.transactions.length, adversarialRows.length, 'Elke banktransactie moet zichtbaar blijven in het rapport.');
-assert.ok(report.audit.unresolved >= 6, 'De bewust ambigue combinaties moeten fail-closed blijven.');
+assert.ok(report.audit.unresolved >= 7, 'De bewust ambigue combinaties moeten fail-closed blijven.');
 assert.equal(view.twijfelgevallen.length, report.audit.unresolved, 'Twijfelgevallenweergave moet aansluiten op unresolved.');
 
 const byId = (id: string) => report.transactions.find(tx => tx.id === id)!;
@@ -88,7 +88,6 @@ expectKnown('a12', 'private_no_vat', 'geen', 0);
 expectKnown('a17', 'domestic_input_21', '5b', 21);
 expectKnown('a18', 'domestic_input_9', '5b', 9);
 expectKnown('a20', 'horeca_bua_9', '5b', 9);
-expectKnown('a21', 'domestic_input_21', '5b', 21);
 expectKnown('a22', 'domestic_input_9', '5b', 9);
 expectKnown('a23', 'domestic_input_21', '5b', 21);
 expectKnown('a24', 'domestic_input_9', '5b', 9);
@@ -102,7 +101,7 @@ const ambiguousSale = byId('a01');
 assert.equal(ambiguousSale.vat.status, 'unknown', 'Een kale verkoopomschrijving mag niet automatisch een tarief krijgen.');
 assert.equal(ambiguousSale.includedInTotals, false, 'Een onbepaalbare verkoopregel mag de BTW-totalen niet vervuilen.');
 
-for (const id of ['a13', 'a14', 'a15', 'a16', 'a19']) {
+for (const id of ['a13', 'a14', 'a15', 'a16', 'a19', 'a21']) {
   const tx = byId(id);
   assert.equal(tx.vat.status, 'unknown', `${id}: ambigue bankdata mag niet gokken`);
   assert.equal(tx.includedInTotals, false, `${id}: ambigue transactie mag totalen niet vervuilen`);
@@ -114,6 +113,8 @@ for (const id of ['a13', 'a14', 'a15', 'a16', 'a19']) {
 // a regex race; it must fail closed.
 assert.equal(byId('a19').vat.status, 'unknown');
 assert.equal(byId('a19').includedInTotals, false);
+assert.equal(byId('a21').vat.status, 'unknown');
+assert.equal(byId('a21').includedInTotals, false);
 
 // Reconciliation: report-level totals must remain internally consistent.
 assert.equal(report.aangifte['5a'], report.overzicht.output.total, '5a moet gelijk zijn aan verschuldigde btw.');
