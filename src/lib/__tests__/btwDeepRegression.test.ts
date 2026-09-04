@@ -40,6 +40,19 @@ expect(ambiguous.includedInTotals === false, 'ambiguous row must be excluded fro
 
 expect(report.audit.unresolved === 1, `expected exactly 1 unresolved transaction, got ${report.audit.unresolved}`);
 
+// Conflicting evidence must never be resolved by picking an arbitrary rate.
+const conflictRows = [
+  { id: 'conflict-rates', date: '2026-08-01', description: 'Kantoorbenodigdheden voeding 9% 21%', memo: '', type: 'expense' as const, amount_incl: 121 },
+  { id: 'conflict-reverse-rate', date: '2026-08-02', description: 'OpenAI LLC btw verlegd 21% 9%', memo: '', type: 'expense' as const, amount_incl: 121 },
+  { id: 'conflict-exempt-taxable', date: '2026-08-03', description: 'Tandarts behandeling 21%', memo: '', type: 'expense' as const, amount_incl: 121 },
+];
+const conflictReport = calculateFiscalVatReport(conflictRows);
+for (const id of conflictRows.map((row) => row.id)) {
+  const tx = conflictReport.transactions.find((candidate) => candidate.id === id) ?? fail(`conflict row missing: ${id}`);
+  expect(tx.classification === 'unresolved', `${id} must fail closed, got ${tx.classification}`);
+  expect(tx.includedInTotals === false, `${id} must be excluded from VAT totals`);
+}
+
 // Large physical bank-file regression: summary rows are mixed into 8,000 real transactions.
 const lines = [
   'Datum;Naam / Omschrijving;Tegenrekening;Af Bij;Bedrag;Mededelingen',
@@ -81,4 +94,4 @@ expect(reverseChargeCount === 1334, `expected 1,334 reverse-charge software rows
 expect(ninePercentCount === 1333, `expected 1,333 9% rows, got ${ninePercentCount}`);
 expect(twentyOneCount === 2666, `expected 2,666 domestic 21% rows, got ${twentyOneCount}`);
 
-console.log(`OK: deep VAT regression; insurance exemption boundary + taxable insurer service + 8,000-row physical CSV (${elapsed} ms).`);
+console.log(`OK: deep VAT regression; conflict fail-closed + insurance exemption boundary + 8,000-row physical CSV (${elapsed} ms).`);
