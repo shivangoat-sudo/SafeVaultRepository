@@ -38,6 +38,14 @@ function enrichDeterministicContext(rows: RawTransaction[]): RawTransaction[] {
     if (row.type === 'expense' && /\balbert\s+heijn\s+zakelijk\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'voedingsmiddelen 9%');
     if (row.type === 'expense' && /\bdidi\s+talks\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'marketingdienst 21%');
     if (row.type === 'expense' && /\badvocatenkantoor\b|\badvocaat\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'advocaat 21%');
+    if (row.type === 'expense' && /\b(?:loon|salaris|salarisbetaling|payroll|nettoloon|loonheffing|dividend)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'geen btw op loon/dividend');
+    if (row.type === 'expense' && /\b(?:lening|aflossing|rente|rentevergoeding|krediet)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'financiering zonder normale voorbelasting');
+    if (row.type === 'expense' && /\b(?:belastingdienst|inkomstenbelasting|vennootschapsbelasting|loonheffing|btw-aangifte|belastingaanslag)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'belastingbetaling zonder btw');
+    if (row.type === 'expense' && /\b(?:bankkosten|rekeningkosten|bank fee|payment fee|transactiekosten|betalingskosten)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'bankkosten financiële dienstverlening');
+    if (row.type === 'expense' && /\b(?:supermarkt|voedingsmiddelen|boodschappen|levensmiddelen|drinkwater|waterrekening|bloemen|bloemboeket|planten|geneesmiddelen|medicijnen|boek|boeken|dagblad|tijdschrift|periodiek)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, '9% goederen');
+    if (row.type === 'expense' && /\b(?:kapper|kapsalon|fietsenmaker|fietsreparatie|schoenenreparatie|schoenmaker|kledingreparatie|personenvervoer|taxi|openbaar vervoer|ov-chipkaart|treinreis|busreis|tramreis|metroreis|museum|theater|concert|bioscoop|sportclub|zwembad|sauna)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, '9% dienst');
+    if (row.type === 'expense' && /\b(?:hotel|overnachting|pension|vakantiehuis|camping)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'logies 21% vanaf 2026');
+    if (row.type === 'expense' && /\b(?:kantoorbenodigdheden|bureau|bureaustoel|printer|monitor|laptop|computer|hardware|elektronica|gereedschap|meubilair|meubel|drukwerk|verpakking|brandstof|benzine|diesel|website|hosting|software|licentie|consultancy|advies|accountant|boekhouding|notaris|verzekering|telecom|internet|telefoon)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'algemene 21% prestatie');
     return row;
   });
 }
@@ -63,7 +71,7 @@ function patchKnownContexts(report: FiscalReport, sourceRows: RawTransaction[]):
     const text = `${source ? textOf(source) : ''} ${tx.description ?? ''} ${tx.omschrijving ?? ''}`.toLowerCase();
     const isNonEuSupplier = /\bopenai(?:\s+llc)?\b|\belevenlabs(?:\s+inc)?\b|\banthropic(?:\s+pbc)?\b|\bnetlify(?:\s+inc)?\b|\bgit(?:hub|hub\s+inc)?\b|\bresend(?:\s+inc)?\b/i.test(text);
     const isEuSupplier = /\badobe\s+systems?\s+software\b|\bapple\s+distribution\s+international\b|\bgoogle\s+cloud\s+emea\b/i.test(text);
-    const isKnownContext = isNonEuSupplier || isEuSupplier || /postnl\s+pakketten?|pakketten?\s+postnl|path[eé]|(?:café|cafe|grand café|grand cafe)|kliniek\s+tandheelkunde|tandarts(?:praktijk)?|tandheelkundige\s+behandeling|kvk\s+inschrijfvergoeding|kamer\s+van\s+koophandel|albert\s+heijn\s+zakelijk|didi\s+talks|advocatenkantoor|\badvocaat\b/i.test(text);
+    const isKnownContext = isNonEuSupplier || isEuSupplier || /postnl\s+pakketten?|pakketten?\s+postnl|path[eé]|(?:café|cafe|grand café|grand cafe)|kliniek\s+tandheelkunde|tandarts(?:praktijk)?|tandheelkundige\s+behandeling|kvk\s+inschrijfvergoeding|kamer\s+van\s+koophandel|albert\s+heijn\s+zakelijk|didi\s+talks|advocatenkantoor|\badvocaat\b|\b(?:loon|salaris|salarisbetaling|payroll|nettoloon|dividend)\b|\b(?:lening|aflossing|rente|rentevergoeding|krediet)\b|\b(?:belastingdienst|inkomstenbelasting|vennootschapsbelasting|loonheffing|btw-aangifte|belastingaanslag)\b|\b(?:bankkosten|rekeningkosten|bank fee|payment fee|transactiekosten|betalingskosten)\b|\b(?:supermarkt|voedingsmiddelen|boodschappen|levensmiddelen|drinkwater|waterrekening|bloemen|bloemboeket|planten|geneesmiddelen|medicijnen|boek|boeken|dagblad|tijdschrift|periodiek)\b|\b(?:kapper|kapsalon|fietsenmaker|fietsreparatie|schoenenreparatie|schoenmaker|kledingreparatie|personenvervoer|taxi|openbaar vervoer|ov-chipkaart|treinreis|busreis|tramreis|metroreis|museum|theater|concert|bioscoop|sportclub|zwembad|sauna)\b|\b(?:hotel|overnachting|pension|vakantiehuis|camping)\b|\b(?:kantoorbenodigdheden|bureau|bureaustoel|printer|monitor|laptop|computer|hardware|elektronica|gereedschap|meubilair|meubel|drukwerk|verpakking|brandstof|benzine|diesel|website|hosting|software|licentie|consultancy|advies|accountant|boekhouding|notaris|verzekering|telecom|internet|telefoon)\b/i.test(text);
     if (!isKnownContext) return tx;
 
     let desired: FiscalClassification | null = null;
@@ -88,15 +96,36 @@ function patchKnownContexts(report: FiscalReport, sourceRows: RawTransaction[]):
     } else if (/kvk\s+inschrijfvergoeding|kamer\s+van\s+koophandel/i.test(text)) {
       desired = 'exempt_input'; rate = 0; vat = 0; excl = round2(tx.amount_incl_input); section = '5b';
       explanation = 'KVK-inschrijfvergoeding: geen btw-bedrag wordt uit de banktransactie gefabriceerd.';
+    } else if (/loon|salaris|payroll|nettoloon|loonheffing|\bdividend\b/i.test(text)) {
+      desired = 'private_no_vat'; rate = 0; vat = 0; excl = round2(tx.amount_incl_input); section = 'geen';
+      explanation = 'Loon-, salaris- of dividendbetaling: geen normale btw-voorbelasting op deze betaling.';
+    } else if (/lening|aflossing|rente|rentevergoeding|krediet/i.test(text)) {
+      desired = 'private_no_vat'; rate = 0; vat = 0; excl = round2(tx.amount_incl_input); section = 'geen';
+      explanation = 'Financieringsbetaling herkend; geen normale btw-voorbelasting op aflossing of rente.';
+    } else if (/belastingdienst|inkomstenbelasting|vennootschapsbelasting|loonheffing|btw-aangifte|belastingaanslag/i.test(text)) {
+      desired = 'private_no_vat'; rate = 0; vat = 0; excl = round2(tx.amount_incl_input); section = 'geen';
+      explanation = 'Belastingbetaling herkend; geen btw op een inkooptransactie.';
+    } else if (/bankkosten|rekeningkosten|bank fee|payment fee|transactiekosten|betalingskosten/i.test(text)) {
+      desired = 'exempt_input'; rate = 0; vat = 0; excl = round2(tx.amount_incl_input); section = '5b';
+      explanation = 'Financiële dienstverlening/bankkosten: geen btw-bedrag uit de banktransactie gefabriceerd.';
     } else if (/postnl\s+pakketten?|pakketten?\s+postnl/i.test(text)) {
       desired = 'domestic_input_21'; rate = 21; vat = grossVat(tx.amount_incl_input, 21); excl = netFromGross(tx.amount_incl_input, 21); section = '5b';
       explanation = 'Pakketdienst van PostNL; 21%-tarief toegepast.';
-    } else if (/path[eé]/i.test(text)) {
+    } else if (/path[eé]|museum|theater|concert|bioscoop|sportclub|zwembad|sauna/i.test(text)) {
       desired = 'domestic_input_9'; rate = 9; vat = grossVat(tx.amount_incl_input, 9); excl = netFromGross(tx.amount_incl_input, 9); section = '5b';
-      explanation = 'Bioscooptoegang; 9%-tarief toegepast.';
-    } else if (/albert\s+heijn\s+zakelijk/i.test(text)) {
+      explanation = 'Culturele, recreatieve of sportieve toegang; 9%-tarief toegepast.';
+    } else if (/albert\s+heijn\s+zakelijk|supermarkt|voedingsmiddelen|boodschappen|levensmiddelen|drinkwater|waterrekening|bloemen|bloemboeket|planten|geneesmiddelen|medicijnen|boek|boeken|dagblad|tijdschrift|periodiek/i.test(text)) {
       desired = 'domestic_input_9'; rate = 9; vat = grossVat(tx.amount_incl_input, 9); excl = netFromGross(tx.amount_incl_input, 9); section = '5b';
-      explanation = 'Voedingsmiddelen voor menselijke consumptie; 9%-tarief toegepast.';
+      explanation = 'Herkenbare 9%-goederencategorie uit de Nederlandse btw-tabel; 9%-tarief toegepast.';
+    } else if (/kapper|kapsalon|fietsenmaker|fietsreparatie|schoenenreparatie|schoenmaker|kledingreparatie|personenvervoer|taxi|openbaar vervoer|ov-chipkaart|treinreis|busreis|tramreis|metroreis/i.test(text)) {
+      desired = 'domestic_input_9'; rate = 9; vat = grossVat(tx.amount_incl_input, 9); excl = netFromGross(tx.amount_incl_input, 9); section = '5b';
+      explanation = 'Herkenbare 9%-dienst uit de Nederlandse btw-tabel; 9%-tarief toegepast.';
+    } else if (/hotel|overnachting|pension|vakantiehuis|camping/i.test(text)) {
+      desired = 'domestic_input_21'; rate = 21; vat = grossVat(tx.amount_incl_input, 21); excl = netFromGross(tx.amount_incl_input, 21); section = '5b';
+      explanation = 'Logiesprestatie in 2026; 21%-tarief toegepast.';
+    } else if (/kantoorbenodigdheden|bureau|bureaustoel|printer|monitor|laptop|computer|hardware|elektronica|gereedschap|meubilair|meubel|drukwerk|verpakking|brandstof|benzine|diesel|website|hosting|software|licentie|consultancy|advies|accountant|boekhouding|notaris|verzekering|telecom|internet|telefoon/i.test(text)) {
+      desired = 'domestic_input_21'; rate = 21; vat = grossVat(tx.amount_incl_input, 21); excl = netFromGross(tx.amount_incl_input, 21); section = '5b';
+      explanation = 'Herkenbare algemene zakelijke goederen/dienst; 21%-hoofdregel toegepast.';
     } else if (/didi\s+talks|advocatenkantoor|\badvocaat\b/i.test(text)) {
       desired = 'domestic_input_21'; rate = 21; vat = grossVat(tx.amount_incl_input, 21); excl = netFromGross(tx.amount_incl_input, 21); section = '5b';
       explanation = 'Zakelijke professionele dienst; algemene 21%-tarief toegepast.';
@@ -104,42 +133,28 @@ function patchKnownContexts(report: FiscalReport, sourceRows: RawTransaction[]):
 
     if (!desired || tx.classification === desired) return tx;
 
-    // The policy report may already have classified this transaction. Remove
-    // that old contribution before applying the production-context correction;
-    // otherwise totals are counted twice (the cause of the previous CI failure).
     const oldVat = tx.vat.status === 'known' ? tx.vat.amount : 0;
     const oldExcl = tx.amount_excl ?? 0;
     if (tx.classification === 'domestic_reverse_charge') {
-      output.domesticReverse = round2(output.domesticReverse - oldVat);
-      output.total = round2(output.total - oldVat);
-      input.reverseCharge = round2(input.reverseCharge - oldVat);
-      input.total = round2(input.total - oldVat);
-      aangifte['2a'].grondslag = round2(aangifte['2a'].grondslag - oldExcl);
-      aangifte['2a'].btw = round2(aangifte['2a'].btw - oldVat);
+      output.domesticReverse = round2(output.domesticReverse - oldVat); output.total = round2(output.total - oldVat); input.reverseCharge = round2(input.reverseCharge - oldVat); input.total = round2(input.total - oldVat); aangifte['2a'].grondslag = round2(aangifte['2a'].grondslag - oldExcl); aangifte['2a'].btw = round2(aangifte['2a'].btw - oldVat);
     } else if (tx.classification === 'eu_reverse_charge') {
-      output.euReverse = round2(output.euReverse - oldVat); output.total = round2(output.total - oldVat);
-      input.reverseCharge = round2(input.reverseCharge - oldVat); input.total = round2(input.total - oldVat);
-      aangifte['4b'].grondslag = round2(aangifte['4b'].grondslag - oldExcl); aangifte['4b'].btw = round2(aangifte['4b'].btw - oldVat);
+      output.euReverse = round2(output.euReverse - oldVat); output.total = round2(output.total - oldVat); input.reverseCharge = round2(input.reverseCharge - oldVat); input.total = round2(input.total - oldVat); aangifte['4b'].grondslag = round2(aangifte['4b'].grondslag - oldExcl); aangifte['4b'].btw = round2(aangifte['4b'].btw - oldVat);
     } else if (tx.classification === 'non_eu_reverse_charge') {
-      output.nonEuReverse = round2(output.nonEuReverse - oldVat); output.total = round2(output.total - oldVat);
-      input.reverseCharge = round2(input.reverseCharge - oldVat); input.total = round2(input.total - oldVat);
-      aangifte['4a'].grondslag = round2(aangifte['4a'].grondslag - oldExcl); aangifte['4a'].btw = round2(aangifte['4a'].btw - oldVat);
+      output.nonEuReverse = round2(output.nonEuReverse - oldVat); output.total = round2(output.total - oldVat); input.reverseCharge = round2(input.reverseCharge - oldVat); input.total = round2(input.total - oldVat); aangifte['4a'].grondslag = round2(aangifte['4a'].grondslag - oldExcl); aangifte['4a'].btw = round2(aangifte['4a'].btw - oldVat);
     } else if (tx.classification === 'domestic_input_21') {
       input.domestic21 = round2(input.domestic21 - oldVat); input.total = round2(input.total - oldVat); aangifte['5b'] = round2(aangifte['5b'] - oldVat);
     } else if (tx.classification === 'domestic_input_9') {
       input.domestic9 = round2(input.domestic9 - oldVat); input.total = round2(input.total - oldVat); aangifte['5b'] = round2(aangifte['5b'] - oldVat);
     } else if (tx.classification === 'horeca_bua_9') {
       nonDeductible = round2(nonDeductible - oldVat);
+    } else if (tx.classification === 'exempt_input') {
+      // No VAT contribution is attached to an exempt input.
     }
 
     if (desired === 'non_eu_reverse_charge') {
-      output.nonEuReverse = round2(output.nonEuReverse + vat); output.total = round2(output.total + vat);
-      input.reverseCharge = round2(input.reverseCharge + vat); input.total = round2(input.total + vat);
-      aangifte['4a'].grondslag = round2(aangifte['4a'].grondslag + excl); aangifte['4a'].btw = round2(aangifte['4a'].btw + vat);
+      output.nonEuReverse = round2(output.nonEuReverse + vat); output.total = round2(output.total + vat); input.reverseCharge = round2(input.reverseCharge + vat); input.total = round2(input.total + vat); aangifte['4a'].grondslag = round2(aangifte['4a'].grondslag + excl); aangifte['4a'].btw = round2(aangifte['4a'].btw + vat);
     } else if (desired === 'eu_reverse_charge') {
-      output.euReverse = round2(output.euReverse + vat); output.total = round2(output.total + vat);
-      input.reverseCharge = round2(input.reverseCharge + vat); input.total = round2(input.total + vat);
-      aangifte['4b'].grondslag = round2(aangifte['4b'].grondslag + excl); aangifte['4b'].btw = round2(aangifte['4b'].btw + vat);
+      output.euReverse = round2(output.euReverse + vat); output.total = round2(output.total + vat); input.reverseCharge = round2(input.reverseCharge + vat); input.total = round2(input.total + vat); aangifte['4b'].grondslag = round2(aangifte['4b'].grondslag + excl); aangifte['4b'].btw = round2(aangifte['4b'].btw + vat);
     } else if (desired === 'horeca_bua_9') {
       nonDeductible = round2(nonDeductible + vat);
     } else if (desired === 'domestic_input_21') {
