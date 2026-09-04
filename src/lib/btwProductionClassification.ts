@@ -55,7 +55,6 @@ const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const grossVat = (incl: number, rate: 9 | 21) => round2(incl * rate / (100 + rate));
 const netFromGross = (incl: number, rate: 9 | 21) => round2(incl - grossVat(incl, rate));
 const inputClass = (rate: 9 | 21): FiscalClassification => rate === 9 ? 'domestic_input_9' : 'domestic_input_21';
-const outputClass = (rate: 9 | 21): FiscalClassification => rate === 9 ? 'domestic_output_9' : 'domestic_output_21';
 
 function patchKnownContexts(report: FiscalReport, sourceRows: RawTransaction[]): FiscalReport {
   const sourceById = new Map(sourceRows.map(row => [row.id, row]));
@@ -75,6 +74,8 @@ function patchKnownContexts(report: FiscalReport, sourceRows: RawTransaction[]):
     const isNonEuSupplier = /\bopenai(?:\s+llc)?\b|\belevenlabs(?:\s+inc)?\b|\banthropic(?:\s+pbc)?\b|\bnetlify(?:\s+inc)?\b|\bgit(?:hub|hub\s+inc)?\b|\bresend(?:\s+inc)?\b/i.test(text);
     const isEuSupplier = /\badobe\s+systems?\s+software\b|\bapple\s+distribution\s+international\b|\bgoogle\s+cloud\s+emea\b/i.test(text);
     const isExpenseContext = tx.type === 'expense';
+    if (!isExpenseContext) return tx;
+
     const isKnownContext = isNonEuSupplier || isEuSupplier || /postnl\s+pakketten?|pakketten?\s+postnl|path[eé]|(?:café|cafe|grand café|grand cafe)|kliniek\s+tandheelkunde|tandarts(?:praktijk)?|tandheelkundige\s+behandeling|kvk\s+inschrijfvergoeding|kamer\s+van\s+koophandel|albert\s+heijn\s+zakelijk|didi\s+talks|advocatenkantoor|\badvocaat\b|\b(?:loon|salaris|salarisbetaling|payroll|nettoloon|dividend)\b|\b(?:lening|aflossing|rente|rentevergoeding|krediet)\b|\b(?:belastingdienst|inkomstenbelasting|vennootschapsbelasting|loonheffing|btw-aangifte|belastingaanslag)\b|\b(?:bankkosten|rekeningkosten|bank fee|payment fee|transactiekosten|betalingskosten)\b|\b(?:supermarkt|voedingsmiddelen|boodschappen|levensmiddelen|drinkwater|waterrekening|bloemen|bloemboeket|planten|geneesmiddelen|medicijnen|boek|boeken|dagblad|tijdschrift|periodiek)\b|\b(?:kapper|kapsalon|fietsenmaker|fietsreparatie|schoenenreparatie|schoenmaker|kledingreparatie|personenvervoer|taxi|openbaar vervoer|ov-chipkaart|treinreis|busreis|tramreis|metroreis|museum|theater|concert|bioscoop|sportclub|zwembad|sauna)\b|\b(?:hotel|overnachting|pension|vakantiehuis|camping)\b|\b(?:kantoorbenodigdheden|bureau|bureaustoel|printer|monitor|laptop|computer|hardware|elektronica|gereedschap|meubilair|meubel|drukwerk|verpakking|brandstof|benzine|diesel|website|hosting|software|licentie|consultancy|advies|accountant|boekhouding|notaris|verzekering|telecom|internet|telefoon)\b/i.test(text);
     if (!isKnownContext) return tx;
 
@@ -84,8 +85,6 @@ function patchKnownContexts(report: FiscalReport, sourceRows: RawTransaction[]):
     let vat = 0;
     let explanation = tx.reason;
     let section: FiscalTransaction['section'] = 'geen';
-
-    if (!isExpenseContext && (isNonEuSupplier || isEuSupplier)) return tx;
 
     if (isNonEuSupplier) {
       desired = 'non_eu_reverse_charge'; rate = 21; excl = round2(tx.amount_incl_input); vat = round2(excl * 0.21); section = '4a';
