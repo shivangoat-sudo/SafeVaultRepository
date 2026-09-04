@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { calculateFiscalVatReport, tweeKolommenWeergave } from '../btwFiscalSafeNormalized';
+import { parseCsvToRawTransactions } from '../../utils/vatCsvParser';
 import type { RawTransaction } from '../btwSafeTypes';
 
 const rows: RawTransaction[] = [
@@ -62,7 +63,7 @@ const ambiguousReport = calculateFiscalVatReport(ambiguous);
 assert.ok(ambiguousReport.transactions.every(t => t.classification === 'unresolved'));
 assert.ok(ambiguousReport.transactions.every(t => t.includedInTotals === false));
 
-// Large-document regression: 4,500 supported bank transactions.
+// Large in-memory transaction stress test: 4,500 supported rows.
 const largeRows: RawTransaction[] = Array.from({ length: 4500 }, (_, i) => ({
   id: `large-${i}`,
   type: 'expense',
@@ -78,4 +79,21 @@ assert.equal(largeReport.transactions.filter(t => t.includedInTotals).length, 45
 assert.equal(tweeKolommenWeergave(largeReport).twijfelgevallen.length, 0);
 assert.ok(elapsed < 15000, `4500 transacties duurden ${elapsed} ms`);
 
-console.log('OK: SafeVault maximizes automatic VAT recognition, keeps genuine ambiguity fail-closed, and handles 4,500 supported transactions without manual classification.');
+// Large-document parser + fiscal regression: 4,500 physical bank rows from a CSV.
+const csvLines = ['Datum;Naam / Omschrijving;Tegenrekening;Af Bij;Bedrag;Mededelingen'];
+for (let i = 0; i < 4500; i++) {
+  const description = i % 3 === 0 ? 'OpenAI LLC' : i % 3 === 1 ? 'PostNL Pakketten' : 'Albert Heijn Zakelijk voedingsmiddelen';
+  csvLines.push(`2026-${String((i % 12) + 1).padStart(2, '0')}-01;${description};NL00TEST;Af;121,00;zakelijke betaling`);
+}
+const csvStarted = Date.now();
+const parsedLarge = parseCsvToRawTransactions(csvLines.join('\n'));
+const parsedReport = calculateFiscalVatReport(parsedLarge);
+const csvElapsed = Date.now() - csvStarted;
+assert.equal(parsedLarge.length, 4500, `CSV-parser moet alle 4.500 fysieke bankregels behouden; kreeg ${parsedLarge.length}`);
+assert.equal(parsedReport.transactions.length, 4500);
+assert.equal(parsedReport.audit.unresolved, 0, '4.500 deterministisch herkenbare CSV-transacties mogen niet als twijfel eindigen.');
+assert.equal(parsedReport.transactions.filter(t => t.includedInTotals).length, 4500);
+assert.equal(tweeKolommenWeergave(parsedReport).twijfelgevallen.length, 0);
+assert.ok(csvElapsed < 15000, `4.500 CSV transacties + BTW-verwerking duurden ${csvElapsed} ms`);
+
+console.log('OK: SafeVault maximizes automatic VAT recognition, keeps genuine ambiguity fail-closed, and handles 4,500 parsed bank transactions without manual classification.');
