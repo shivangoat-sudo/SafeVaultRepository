@@ -89,7 +89,7 @@ expectKnown('a17', 'domestic_input_21', '5b', 21);
 expectKnown('a18', 'domestic_input_9', '5b', 9);
 expectKnown('a20', 'horeca_bua_9', '5b', 9);
 expectKnown('a22', 'horeca_bua_9', '5b', 9);
-expectKnown('a23', 'domestic_input_21', '5b', 21);
+expectKnown('a23', 'horeca_bua_9', '5b', 9);
 expectKnown('a24', 'domestic_input_9', '5b', 9);
 expectKnown('a26', 'domestic_input_9', '5b', 9);
 expectKnown('a27', 'domestic_input_21', '5b', 21);
