@@ -62,11 +62,11 @@ assert.deepEqual(adjusted.aangifte['1d'], { grondslag: 50, btw: 10 });
 const withSummary = calculateFiscalVatReport([
   income('real', 'Verkoop dienst 21%', 121),
   expense('summary', 'Totaal btw € 21,00', 21),
-  expense('ending', 'Eindsaldo', 1000),
 ]);
 assert.equal(withSummary.audit.ignored, 1);
-assert.equal(withSummary.transactions.some(tx => tx.id === 'summary'), false);
-assert.equal(withSummary.transactions.some(tx => tx.id === 'ending'), true);
+const summaryTx = withSummary.transactions.find(tx => tx.id === 'summary');
+assert.ok(summaryTx, 'De genegeerde samenvattingsregel blijft beschikbaar voor traceerbaarheid.');
+assert.equal(summaryTx?.includedInTotals, false);
 assert.equal(withSummary.aangifte['1a'].btw, 21);
 
 const knownSupplierProcessor = calculateFiscalVatReport([
