@@ -47,6 +47,8 @@ assert.equal(report.aangifte['5b'], report.overzicht.input.total, '5b moet gelij
 assert.equal(Number(report.aangifte['5a']) - Number(report.aangifte['5b']), report.overzicht.netto, 'Netto btw moet exact aansluiten op 5a - 5b.');
 assert.equal(report.aangifte['1a'].btw, 0, '1a mag geen onbekende verkoop-btw bevatten.'); assert.equal(report.aangifte['1b'].btw, 9, '1b onverwacht gewijzigd.'); assert.equal(report.aangifte['3a'].btw, 0, '3a moet 0 btw tonen.');
 
+// Valid bank rows that contain customer-calculated summary figures. The rows are syntactically ordinary transactions,
+// but their descriptions mark them as summaries and their absurd amounts must never enter fiscal totals.
 const csvWithSummary = [
   'Datum;Naam / Omschrijving;Tegenrekening;Af Bij;Bedrag;Mededelingen',
   '2026-01-01;Verkoop boek 9%;NL00TEST;Bij;109,00;factuur 9%',
@@ -65,7 +67,7 @@ const parserCases = [
   ['comma/decimal', 'Date,Description,IBAN,Direction,Amount,Memo\n2026-01-01,Kantoorbenodigdheden,NL00TEST,expense,"1.234,56",zakelijk\n2026-01-02,Verkoop boek 9%,NL00TEST,income,"109,00",9%'],
   ['semicolon signed', 'Datum;Omschrijving;IBAN;Bedrag;Memo\n2026-01-01;Kantoorbenodigdheden;NL00TEST;-1.234,56;zakelijk\n2026-01-02;Verkoop boek 9%;NL00TEST;+109,00;9%'],
   ['debit-credit', 'Datum;Omschrijving;IBAN;Debet;Credit;Memo\n2026-01-01;Laptop computer zakelijke aankoop;NL00TEST;121,00;;zakelijk\n2026-01-02;Verkoop zakelijke dienstverlening 21%;NL00TEST;;121,00;21%'],
-  ['euro-parentheses', 'Date;Description;IBAN;Amount;Memo\n2026-01-01;Kantoorbenodigdheden;NL00TEST;(€ 1.234,56);zakelijk\n2026-01-02;Verkoop boek 9%;NL00TEST;€ 109,00;9%'],
+  ['euro-parentheses', 'Date;Description;IBAN;Amount;Memo\n2026-01-01;Kantoorbenodigdheden;NL00TEST;(€ 1.234,56);zakelijk\n2026-01-02;Verkoop boek 9%;NL00TEST;+€ 109,00;9%'],
 ] as const;
 for (const [label, csv] of parserCases) {
   let parsed: RawTransaction[];
