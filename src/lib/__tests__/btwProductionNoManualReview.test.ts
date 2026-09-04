@@ -27,10 +27,8 @@ const view = tweeKolommenWeergave(report);
 if (report.audit.unresolved !== 0) throw new Error(`Geen enkele voorbeeldtransactie mag unresolved zijn; kreeg ${report.audit.unresolved}.`);
 if (report.audit.included !== rows.length) throw new Error(`Alle ${rows.length} transacties moeten automatisch in het berekeningsrapport staan.`);
 if (view.twijfelgevallen.length !== 0) throw new Error(`Geen enkele automatisch herkende voorbeeldtransactie mag als handmatige twijfelclassificatie worden getoond; kreeg ${view.twijfelgevallen.length}.`);
-if (report.audit.evidenceRequired === 0) throw new Error('De evidence-laag moet normale aftrekbare inkooptransacties apart markeren zonder ze als classificatietwijfel te tonen.');
-
-const nonEvidenceProblems = report.audit.problems.filter(p => !/factuur|bewijs|document|evidence/i.test(p));
-if (nonEvidenceProblems.length !== 0) throw new Error(`Onverwachte fiscale auditproblemen: ${nonEvidenceProblems.join(' | ')}`);
+if (report.audit.evidenceRequired !== 12) throw new Error(`Er moeten precies 12 normale aftrekbare inkooptransacties apart als bewijsgevoelig worden gemarkeerd; kreeg ${report.audit.evidenceRequired}.`);
+if (report.audit.problems.length !== 0) throw new Error(`Het productierapport mag geen fiscale auditproblemen bevatten; kreeg ${report.audit.problems.join(' | ')}.`);
 
 const byId = (id: string) => report.transactions.find(tx => tx.id === id)!;
 const expect = (id: string, classification: string, section: string, rate: number, deductible: boolean) => {
@@ -59,4 +57,26 @@ expect('ah', 'domestic_input_9', '5b', 9, true);
 expect('didi', 'domestic_input_21', '5b', 21, true);
 expect('lawyer', 'domestic_input_21', '5b', 21, true);
 
-console.log('OK: production regression set is automatically classified with zero manual classifications; evidence requirements remain separate and calculation is not blocked by missing invoices.');
+const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+const sum = (ids: string[]) => round2(ids.reduce((total, id) => total + byId(id).vat.amount, 0));
+const expected4a = round2((24.20 + 30 + 19 + 21 + 24.20 + 20) * 0.21);
+const expected4b = round2((149 + 62.91 + 68.45) * 0.21);
+const expected5b = round2(sum(['openai','anthropic','elevenlabs','netlify','github','resend','adobe','apple','google','postnl','ah','didi','lawyer']));
+const expectedNonDeductible = round2(sum(['cafe','grand-cafe']));
+
+if (report.aangifte['4a'].grondslag !== 138.40 || report.aangifte['4a'].btw !== expected4a)
+  throw new Error(`Rubriek 4a is onjuist: ${JSON.stringify(report.aangifte['4a'])}; verwacht grondslag 138.40 en btw ${expected4a}.`);
+if (report.aangifte['4b'].grondslag !== 280.36 || report.aangifte['4b'].btw !== expected4b)
+  throw new Error(`Rubriek 4b is onjuist: ${JSON.stringify(report.aangifte['4b'])}; verwacht grondslag 280.36 en btw ${expected4b}.`);
+if (report.aangifte['5b'] !== expected5b)
+  throw new Error(`Rubriek 5b is onjuist: kreeg ${report.aangifte['5b']}, verwacht ${expected5b}.`);
+if (report.aangifte['5a'] !== report.overzicht.output.total)
+  throw new Error(`Rubriek 5a sluit niet aan op het onafhankelijke verschuldigde-btw totaal: ${report.aangifte['5a']} vs ${report.overzicht.output.total}.`);
+if (report.aangifte['5b'] !== report.overzicht.input.total)
+  throw new Error(`Rubriek 5b sluit niet aan op het voorbelastingtotaal: ${report.aangifte['5b']} vs ${report.overzicht.input.total}.`);
+if (report.overzicht.nonDeductible !== expectedNonDeductible)
+  throw new Error(`Niet-aftrekbare horeca-btw is onjuist: kreeg ${report.overzicht.nonDeductible}, verwacht ${expectedNonDeductible}.`);
+if (report.audit.included !== report.transactions.filter(t => t.includedInTotals).length)
+  throw new Error('Audit included-count sluit niet aan op de transacties die daadwerkelijk in de berekening zitten.');
+
+console.log('OK: bank-only production regression set is fully classified without manual fiscal review; exact 4a/4b/5a/5b totals reconcile and documentary evidence remains separate from classification.');
