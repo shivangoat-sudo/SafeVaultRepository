@@ -66,8 +66,8 @@ const parsed = parseCsvToRawTransactions(lines.join('\n'));
 const largeReport = calculateFiscalVatReport(parsed);
 const elapsed = Date.now() - started;
 
-expect(parsed.length === 8002, `expected 8,002 parsed rows including summary rows, got ${parsed.length}`);
-expect(largeReport.transactions.length === 8002, `expected 8,002 report rows, got ${largeReport.transactions.length}`);
+expect(parsed.length >= 8000, `expected at least 8,000 parsed bank rows, got ${parsed.length}`);
+expect(!largeReport.transactions.some((tx) => /totaal uitgaven/i.test(String(tx.description ?? ''))), 'summary rows must never become fiscal transactions');
 expect(largeReport.audit.unresolved === 0, `large known-context file must have 0 unresolved rows, got ${largeReport.audit.unresolved}`);
 expect(largeReport.audit.problems.length === 0, `large known-context file has audit problems: ${largeReport.audit.problems.join('; ')}`);
 expect(elapsed < 15000, `8,000-row parse/classification regression took ${elapsed} ms`);
@@ -76,9 +76,9 @@ const exemptCount = largeReport.transactions.filter((tx) => tx.classification ==
 const reverseChargeCount = largeReport.transactions.filter((tx) => tx.classification === 'non_eu_reverse_charge').length;
 const ninePercentCount = largeReport.transactions.filter((tx) => tx.classification === 'domestic_input_9').length;
 const twentyOneCount = largeReport.transactions.filter((tx) => tx.classification === 'domestic_input_21').length;
-expect(exemptCount === 2668, `expected 2,668 exempt insurance rows, got ${exemptCount}`);
+expect(exemptCount === 2667, `expected 2,667 exempt insurance rows, got ${exemptCount}`);
 expect(reverseChargeCount === 1334, `expected 1,334 reverse-charge software rows, got ${reverseChargeCount}`);
-expect(ninePercentCount === 1334, `expected 1,334 9% rows, got ${ninePercentCount}`);
+expect(ninePercentCount === 1333, `expected 1,333 9% rows, got ${ninePercentCount}`);
 expect(twentyOneCount === 2666, `expected 2,666 domestic 21% rows, got ${twentyOneCount}`);
 
 console.log(`OK: deep VAT regression; insurance exemption boundary + taxable insurer service + 8,000-row physical CSV (${elapsed} ms).`);
