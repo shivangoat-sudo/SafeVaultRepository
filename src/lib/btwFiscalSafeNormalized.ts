@@ -79,11 +79,6 @@ function maskAmbiguousRows(rows: import('./btwSafeTypes').RawTransaction[]): {
   return { rows: masked, originalTextById };
 }
 
-/**
- * Some bank descriptions contain an unambiguous insurance-premium signal.
- * Insurance premiums are VAT-exempt, but other insurer services can be taxable.
- * We keep this strict: a generic insurer/insurance merchant name is not enough.
- */
 function isClearlyExemptInsurance(row: import('./btwSafeTypes').RawTransaction): boolean {
   if (row.type !== 'expense') return false;
   const text = normalizedText(row);
@@ -117,11 +112,9 @@ function mergeOriginalTexts(
   return merged;
 }
 
-function applyClearlyExemptInsuranceClassifications(report: FiscalReport, sourceRows: import('./btwSafeTypes').RawTransaction[]): FiscalReport {
+function applyClearlyExemptInsuranceClassifications(report: CoreFiscalReport, sourceRows: import('./btwSafeTypes').RawTransaction[]): CoreFiscalReport {
   const sourceById = new Map(sourceRows.map((row) => [row.id, row]));
-  const matchedIds = new Set(
-    sourceRows.filter(isClearlyExemptInsurance).map((row) => row.id),
-  );
+  const matchedIds = new Set(sourceRows.filter(isClearlyExemptInsurance).map((row) => row.id));
   if (!matchedIds.size) return report;
 
   const transactions = report.transactions.map((tx): FiscalTransaction => {
@@ -159,6 +152,9 @@ function applyClearlyExemptInsuranceClassifications(report: FiscalReport, source
   const known = transactions.filter((tx) => tx.classification !== 'unresolved').length;
   const unresolved = transactions.filter((tx) => tx.classification === 'unresolved').length;
   const included = transactions.filter((tx) => tx.includedInTotals).length;
+  const problems = unresolved === 0
+    ? report.audit.problems.filter((problem) => !/vereisen boekhoudkundige beoordeling voordat het rapport fiscaal compleet is/i.test(problem))
+    : report.audit.problems;
 
   return {
     ...report,
@@ -168,12 +164,8 @@ function applyClearlyExemptInsuranceClassifications(report: FiscalReport, source
       known,
       unresolved,
       included,
-      problems: unresolved === 0
-        ? report.audit.problems.filter((problem) => !/vereisen boekhoudkundige beoordeling voordat het rapport fiscaal compleet is/i.test(problem))
-        : report.audit.problems,
-      ok: unresolved === 0
-        ? report.audit.problems.filter((problem) => !/vereisen boekhoudkundige beoordeling voordat het rapport fiscaal compleet is/i.test(problem)).length === 0
-        : report.audit.ok,
+      problems,
+      ok: problems.length === 0,
     },
   };
 }
@@ -250,14 +242,15 @@ export function calculateFiscalVatReport(
   const classifierRows = insurance.rows;
   const originalTextById = mergeOriginalTexts(ambiguous.originalTextById, insurance.originalTextById);
   const report = calculateProductionVatReport(classifierRows, overrides, adjustments);
-  const insuranceClassified = applyClearlyExemptInsuranceClassifications(report, rows);
-  const restored = restoreOriginalText({
-    ...insuranceClassified,
+  const insuranceClassifiedCore = applyClearlyExemptInsuranceClassifications(report, rows);
+  const insuranceClassified: FiscalReport = {
+    ...insuranceClassifiedCore,
     overzicht: {
-      ...insuranceClassified.overzicht,
-      status: insuranceClassified.overzicht.status === 'af_te_drager' ? 'af_te_dragen' : 'terug_te_vorderen',
+      ...insuranceClassifiedCore.overzicht,
+      status: insuranceClassifiedCore.overzicht.status === 'af_te_drager' ? 'af_te_dragen' : 'terug_te_vorderen',
     },
-  }, originalTextById);
+  };
+  const restored = restoreOriginalText(insuranceClassified, originalTextById);
   return rebuildAuditState(addEvidenceState(restored));
 }
 
