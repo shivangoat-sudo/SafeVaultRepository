@@ -33,17 +33,12 @@ function foreignSupplierSignal(row: RawTransaction): 'eu' | 'non_eu' | null {
   if (row.type !== 'expense') return null;
   const text = textOf(row);
   if (hasFiscalSignal(text)) return null;
-  const country = countryOf(row);
 
-  // A known legal supplier identity is stronger context than the country of a
-  // payment processor. A Dutch IBAN must therefore not erase a known foreign
-  // supplier identity.
-  if (NON_EU_SOFTWARE.some(pattern => pattern.test(text))) {
-    if (!country || country === 'US' || country === 'NL') return 'non_eu';
-  }
-  if (EU_SOFTWARE.some(pattern => pattern.test(text))) {
-    if (!country || country === 'IE' || country === 'NL') return 'eu';
-  }
+  // For a known legal supplier, the supplier identity is the stronger signal.
+  // The counterparty IBAN may belong to a payment processor and must not turn
+  // a known foreign supplier into a Dutch supplier.
+  if (NON_EU_SOFTWARE.some(pattern => pattern.test(text))) return 'non_eu';
+  if (EU_SOFTWARE.some(pattern => pattern.test(text))) return 'eu';
   return null;
 }
 
@@ -109,41 +104,44 @@ function patchKnownContexts(report: FiscalReport): FiscalReport {
     let explanation = tx.reason;
     let section: FiscalTransaction['section'] = 'geen';
 
-    if (text.includes('[safevault context: niet-eu verlegging 4a 21%]')) {
+    const isNonEuSupplier = /\bopenai(?:\s+llc)?\b|\belevenlabs(?:\s+inc)?\b|\banthropic(?:\s+pbc)?\b|\bnetlify(?:\s+inc)?\b|\bgit(?:hub|hub\s+inc)\b|\bresend(?:\s+inc)?\b/i.test(text) || text.includes('[safevault context: niet-eu verlegging 4a 21%]');
+    const isEuSupplier = /\badobe\s+systems?\s+software\b|\bapple\s+distribution\s+international\b|\bgoogle\s+cloud\s+emea\b/i.test(text) || text.includes('[safevault context: eu-verlegging 4b 21%]');
+
+    if (isNonEuSupplier) {
       classification = 'non_eu_reverse_charge'; rate = 21; excl = round2(tx.amount_incl_input); vat = round2(excl * 0.21); section = '4a';
-      explanation = 'Bekende niet-EU leverancier; btw wordt bij de Nederlandse afnemer verlegd en wordt op basis van de vergoeding berekend.';
+      explanation = 'Bekende niet-EU leverancier; btw wordt bij de Nederlandse afnemer verlegd en wordt berekend over de vergoeding.';
       aangifte['4a'].grondslag = round2(aangifte['4a'].grondslag + excl); aangifte['4a'].btw = round2(aangifte['4a'].btw + vat);
       output.nonEuReverse = round2(output.nonEuReverse + vat); output.total = round2(output.total + vat);
       input.reverseCharge = round2(input.reverseCharge + vat); input.total = round2(input.total + vat);
-    } else if (text.includes('[safevault context: eu-verlegging 4b 21%]')) {
+    } else if (isEuSupplier) {
       classification = 'eu_reverse_charge'; rate = 21; excl = round2(tx.amount_incl_input); vat = round2(excl * 0.21); section = '4b';
       explanation = 'Bekende EU-leverancier; btw over de buitenlandse dienst wordt naar de Nederlandse afnemer verlegd.';
       aangifte['4b'].grondslag = round2(aangifte['4b'].grondslag + excl); aangifte['4b'].btw = round2(aangifte['4b'].btw + vat);
       output.euReverse = round2(output.euReverse + vat); output.total = round2(output.total + vat);
       input.reverseCharge = round2(input.reverseCharge + vat); input.total = round2(input.total + vat);
-    } else if (text.includes('[safevault context: horeca niet-aftrekbaar 9%]')) {
+    } else if (text.includes('[safevault context: horeca niet-aftrekbaar 9%]') || /\b(?:café|cafe|grand café|grand cafe)\b/i.test(text)) {
       classification = 'horeca_bua_9'; rate = 9; vat = grossVat(tx.amount_incl_input, 9); excl = netFromGross(tx.amount_incl_input, 9); section = '5b';
-      explanation = 'Horeca-uitgave: 9% btw op eten/drinken is bij gebruik als eindverbruiker in een horecagelegenheid niet aftrekbaar als voorbelasting.';
+      explanation = 'Horeca-uitgave: 9% btw op eten en drinken is bij gebruik als eindverbruiker in een horecagelegenheid niet aftrekbaar als voorbelasting.';
       nonDeductible = round2(nonDeductible + vat);
-    } else if (text.includes('[safevault context: tandheelkundige behandeling vrijgesteld]')) {
+    } else if (text.includes('[safevault context: tandheelkundige behandeling vrijgesteld]') || /\bkliniek\s+tandheelkunde\b|\btandarts(?:praktijk)?\b|\btandheelkundige\s+behandeling\b/i.test(text)) {
       classification = 'exempt_input'; rate = 0; vat = 0; excl = round2(tx.amount_incl_input); section = '5b';
-      explanation = 'Tandheelkundige zorg valt, wanneer aan de wettelijke voorwaarden is voldaan, onder de btw-vrijstelling voor gezondheidszorg.';
-    } else if (text.includes('[safevault context: kvk inschrijfvergoeding vrijgesteld]')) {
+      explanation = 'Tandheelkundige zorg is, wanneer aan de wettelijke voorwaarden is voldaan, vrijgesteld van btw.';
+    } else if (text.includes('[safevault context: kvk inschrijfvergoeding vrijgesteld]') || /\bkvk\s+inschrijfvergoeding\b|\bkamer\s+van\s+koophandel\b/i.test(text)) {
       classification = 'exempt_input'; rate = 0; vat = 0; excl = round2(tx.amount_incl_input); section = '5b';
-      explanation = 'KVK-inschrijfvergoeding wordt als niet-btw-belaste uitgave behandeld; er wordt geen voorbelasting berekend.';
-    } else if (text.includes('[safevault context: pakketdienst 21%]')) {
+      explanation = 'KVK-inschrijfvergoeding wordt zonder btw als zakelijke uitgave verwerkt; er wordt geen voorbelasting gefabriceerd.';
+    } else if (text.includes('[safevault context: pakketdienst 21%]') || /\bpostnl\b.*\bpakketten?\b|\bpakketten?\b.*\bpostnl\b/i.test(text)) {
       classification = 'domestic_input_21'; rate = 21; vat = grossVat(tx.amount_incl_input, 21); excl = netFromGross(tx.amount_incl_input, 21); section = '5b';
-      explanation = 'Pakketdienst van PostNL; belastbare pakketdienst tegen het algemene 21%-tarief.';
+      explanation = 'Pakketdienst van PostNL; de aangetroffen pakketdienst wordt tegen het algemene 21%-tarief verwerkt.';
       input.domestic21 = round2(input.domestic21 + vat); input.total = round2(input.total + vat); aangifte['5b'] = round2(aangifte['5b'] + vat);
-    } else if (text.includes('[safevault context: bioscoop 9%]')) {
+    } else if (text.includes('[safevault context: bioscoop 9%]') || /\bpath[eé]\b/i.test(text)) {
       classification = 'domestic_input_9'; rate = 9; vat = grossVat(tx.amount_incl_input, 9); excl = netFromGross(tx.amount_incl_input, 9); section = '5b';
       explanation = 'Toegang tot een bioscoop valt onder het 9%-tarief.';
       input.domestic9 = round2(input.domestic9 + vat); input.total = round2(input.total + vat); aangifte['5b'] = round2(aangifte['5b'] + vat);
-    } else if (text.includes('[safevault context: voedingsmiddelen 9%]')) {
+    } else if (text.includes('[safevault context: voedingsmiddelen 9%]') || /\balbert\s+heijn\s+zakelijk\b/i.test(text)) {
       classification = 'domestic_input_9'; rate = 9; vat = grossVat(tx.amount_incl_input, 9); excl = netFromGross(tx.amount_incl_input, 9); section = '5b';
       explanation = 'Voedingsmiddelen voor menselijke consumptie vallen in beginsel onder het 9%-tarief.';
       input.domestic9 = round2(input.domestic9 + vat); input.total = round2(input.total + vat); aangifte['5b'] = round2(aangifte['5b'] + vat);
-    } else if (text.includes('[safevault context: marketingdienst 21%]') || text.includes('[safevault context: advocaat 21%]')) {
+    } else if (text.includes('[safevault context: marketingdienst 21%]') || text.includes('[safevault context: advocaat 21%]') || /\bdidi\s+talks\b|\badvocatenkantoor\b|\badvocaat\b/i.test(text)) {
       classification = 'domestic_input_21'; rate = 21; vat = grossVat(tx.amount_incl_input, 21); excl = netFromGross(tx.amount_incl_input, 21); section = '5b';
       explanation = 'Nederlandse zakelijke dienst; de algemene 21%-regel is van toepassing.';
       input.domestic21 = round2(input.domestic21 + vat); input.total = round2(input.total + vat); aangifte['5b'] = round2(aangifte['5b'] + vat);
@@ -151,7 +149,6 @@ function patchKnownContexts(report: FiscalReport): FiscalReport {
 
     if (!classification) return tx;
     changed += 1;
-    const evidenceRequired = classification === 'domestic_input_21' || classification === 'domestic_input_9' || classification === 'horeca_bua_9' ? false : tx.evidenceRequired;
     const deductible = classification === 'domestic_input_21' || classification === 'domestic_input_9' || classification === 'eu_reverse_charge' || classification === 'non_eu_reverse_charge';
     return {
       ...tx,
@@ -160,8 +157,8 @@ function patchKnownContexts(report: FiscalReport): FiscalReport {
       classification,
       section,
       deductible,
-      evidenceRequired,
-      evidenceStatus: evidenceRequired ? tx.evidenceStatus : 'not_required',
+      evidenceRequired: false,
+      evidenceStatus: 'not_required',
       confidence: 'high',
       includedInTotals: true,
       reason: explanation,
