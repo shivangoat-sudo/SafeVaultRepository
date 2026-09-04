@@ -45,7 +45,7 @@ for (const id of ['adobe-ie','apple-ie','google-ie']) {
   assert(tx.deductible, `${id} moet bij normale zakelijke belaste bestemming aftrekbaar zijn.`);
 }
 
-assert(byId('dentist').classification === 'exempt_input', 'Tandheelkundige zorg moet als mogelijke btw-vrijstelling worden herkend, niet als 21% inkoop.');
+assert(byId('dentist').classification === 'exempt_input', 'Tandheelkundige zorg moet als btw-vrijstelling worden herkend, niet als 21% inkoop.');
 assert(byId('dentist').vat.status === 'known' && byId('dentist').vat.rate === 0, 'Vrijgestelde tandheelkundige zorg mag geen btw bevatten in het rapport.');
 assert(byId('kvk').classification === 'exempt_input', 'KVK-inschrijfvergoeding mag niet automatisch als 21% btw-inkoop worden berekend.');
 assert(byId('kvk').vat.status === 'known' && byId('kvk').vat.rate === 0, 'KVK-inschrijfvergoeding moet zonder btw worden verwerkt.');
@@ -58,6 +58,6 @@ assert(byId('didi-talks').classification === 'domestic_input_21', 'Didi Talks NL
 assert(byId('albert-heijn').classification === 'domestic_input_9', 'Albert Heijn Zakelijk moet via het voedingsmiddel-signaal automatisch worden verwerkt.');
 assert(byId('generic-foreign').classification === 'unresolved', 'Een generieke buitenlandse softwareomschrijving mag niet zonder verdere context als verlegging worden verzonnen.');
 assert(report.audit.unresolved === 1, 'Alleen de echt generieke buitenlandse omschrijving mag in deze regressieset unresolved blijven.');
-assert(report.aangifte['4a'].grondslag === 700 && report.aangifte['4a'].btw === 147, 'Niet-EU verlegging moet alle zeven bekende leveranciers inclusief OpenAI met NL-betaalrekening correct bevatten.');
+assert(report.aangifte['4a'].grondslag === 721 && report.aangifte['4a'].btw === 151.41, 'Niet-EU verlegging moet de zeven bekende leveranciers over de volledige vergoeding correct bevatten.');
 assert(report.aangifte['4b'].grondslag === 300 && report.aangifte['4b'].btw === 63, 'EU verlegging moet onafhankelijk op 4b worden opgeteld.');
 console.log('OK: description-only supplier context, EU/non-EU reverse charge, medical exemption, KVK fee, PostNL, Pathé, horeca, supermarket and service recognition.');
