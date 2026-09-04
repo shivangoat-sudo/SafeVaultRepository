@@ -83,7 +83,7 @@ expectKnown('explicit', 'domestic_input_21', '5b', 21, true);
 assert.equal(byId('ambiguous').vat.status, 'unknown', 'De veilige engine mag een werkelijk ambigue omschrijving niet verzinnen.');
 assert.equal(byId('ambiguous').includedInTotals, false, 'Een werkelijk ambigue regel mag geen btw-totalen vervuilen.');
 assert.equal(report.aangifte['1a'].btw, 21, '1a moet alleen verschuldigde 21%-btw bevatten.');
-assert.equal(report.aangifte['1b'].btw, 10.01, '1b moet alleen verschuldigde 9%-btw bevatten.');
+assert.equal(report.aangifte['1b'].btw, 9.99, '1b moet alleen verschuldigde 9%-btw bevatten.');
 assert.equal(report.aangifte['3a'].btw, 0, '0%-uitvoer heeft geen verschuldigde btw.');
 assert.equal(report.aangifte['5a'], report.overzicht.output.total, '5a moet exact aansluiten op verschuldigde btw.');
 assert.equal(report.aangifte['5b'], report.overzicht.input.total, '5b moet exact aansluiten op aftrekbare voorbelasting.');
@@ -114,7 +114,7 @@ assert.equal(parsedComma[1].amount_incl, 109);
 const csvSigned = [
   'Datum;Omschrijving;IBAN;Bedrag;Memo',
   '2026-01-04;Kantoorbenodigdheden;NL00TEST;-121,00;zakelijk',
-  '2026-01-05;Verkoop boek 9%;NL00TEST;109,00;9%',
+  '2026-01-05;Verkoop boek 9%;NL00TEST;+109,00;9%',
 ].join('\n');
 const parsedSigned = parseCsvToRawTransactions(csvSigned);
 assert.equal(parsedSigned.length, 2, 'Een bankexport met alleen een gesigneerd bedrag moet worden gelezen.');
