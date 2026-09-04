@@ -1,7 +1,7 @@
 name: BTW safety CI
 on:
   push:
-    branches: [main]
+    branches: [main, fix/btw-production-autoclassification]
   pull_request:
     branches: [main]
 permissions:

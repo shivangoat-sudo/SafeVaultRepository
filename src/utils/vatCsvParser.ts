@@ -14,35 +14,63 @@ export function parseCsvToRawTransactions(csvContent: string): RawTransaction[] 
   if (rows.length <= 1) return [];
   const headers = rows[0].map(h => String(h ?? '').replace(/^\uFEFF/, '').trim().toLowerCase());
   const findIdx = (keywords: string[]) => keywords.map(k => headers.findIndex(h => h === k || h.includes(k))).find(i => i !== -1) ?? -1;
-  const datumIdx=findIdx(['datum','date']);
-  const descriptionIdx=findIdx(['naam / omschrijving','omschrijving','description','counterparty','naam']);
-  const counterpartyIdx=findIdx(['tegenrekening','iban']);
-  const directionIdx=findIdx(['af bij','af/bij','direction','type']);
-  const amountIdx=findIdx(['bedrag','amount']);
-  const memoIdx=findIdx(['mededelingen','memo','opmerking','notes']);
+  const findExactIdx = (names: string[]) => names.map(n => headers.findIndex(h => h === n)).find(i => i !== -1) ?? -1;
+  const datumIdx=findIdx(['datum','date','transaction date','boekdatum']);
+  const descriptionIdx=findIdx(['naam / omschrijving','omschrijving','description','counterparty','naam','tegenpartij','details','mededeling']);
+  const counterpartyIdx=findIdx(['tegenrekening','iban','counterparty iban','rekeningnummer']);
+  const directionIdx=findIdx(['af bij','af/bij','direction','type','credit debit','debit credit']);
+  const amountIdx=findIdx(['bedrag','amount','transaction amount','waarde']);
+  const debitIdx=findExactIdx(['debit','debet','debitering','afgeschreven','withdrawal','uitgaand']);
+  const creditIdx=findExactIdx(['credit','creditering','bijgeschreven','deposit','inkomend']);
+  const memoIdx=findIdx(['mededelingen','memo','opmerking','notes','message']);
   const submittedExclIdx=findIdx(['bedrag excl btw','bedrag exclusief btw','amount excl vat','netto bedrag','grondslag']);
   const submittedVatIdx=findIdx(['btw bedrag','btw-bedrag','vat amount','omzetbelasting']);
   const submittedRateIdx=findIdx(['btw percentage','btw-percentage','btw tarief','btw-tarief','vat rate','vat percentage']);
   const submittedSectionIdx=findIdx(['btw rubriek','btw-rubriek','aangifterubriek','aangifte rubriek','rubriek']);
-  if(amountIdx===-1) throw new Error('CSV bevat geen herkenbare bedragkolom.');
-  if(directionIdx===-1) throw new Error('CSV bevat geen herkenbare richtingkolom (Af Bij/type/direction).');
+  if(amountIdx===-1 && debitIdx===-1 && creditIdx===-1) throw new Error('CSV bevat geen herkenbare bedragkolom.');
   const output: RawTransaction[]=[]; const seen=new Map<string,number>();
   for(let i=1;i<rows.length;i++){
     const row=rows[i]; if(!row?.length) continue;
     const date=datumIdx>=0?String(row[datumIdx]??'').trim():'';
     const description=descriptionIdx>=0?String(row[descriptionIdx]??'').trim():'Transactie';
     const iban=counterpartyIdx>=0?String(row[counterpartyIdx]??'').trim():'';
-    const direction=String(row[directionIdx]??'').trim().toLowerCase();
-    const rawAmount=String(row[amountIdx]??'').trim();
+    const rawDirection=directionIdx>=0?String(row[directionIdx]??'').trim().toLowerCase():'';
+    const rawAmount=amountIdx>=0?String(row[amountIdx]??'').trim():'';
+    const rawDebit=debitIdx>=0?String(row[debitIdx]??'').trim():'';
+    const rawCredit=creditIdx>=0?String(row[creditIdx]??'').trim():'';
     const memo=memoIdx>=0?String(row[memoIdx]??'').trim():'';
-    if(!rawAmount) continue;
-    const parsed=parseDutchAmount(rawAmount);
-    if(parsed===null) throw new Error(`Ongeldig bedrag op CSV-regel ${i+1}: ${rawAmount}`);
-    if(parsed===0) continue;
-    const income=['bij','income','inkomsten','credit','cr','c'].includes(direction);
-    const expense=['af','expense','uitgaven','debit','dr','d'].includes(direction);
-    if(!income&&!expense) throw new Error(`Onbekende transactierichting op CSV-regel ${i+1}: ${direction||'(leeg)'}`);
+
+    let parsed:number|null=null;
+    let inferredDirection:'income'|'expense'|null=null;
+    if(debitIdx>=0||creditIdx>=0){
+      const debit=rawDebit?parseDutchAmount(rawDebit):null;
+      const credit=rawCredit?parseDutchAmount(rawCredit):null;
+      if(rawDebit&&debit===null) throw new Error(`Ongeldig debetbedrag op CSV-regel ${i+1}: ${rawDebit}`);
+      if(rawCredit&&credit===null) throw new Error(`Ongeldig creditbedrag op CSV-regel ${i+1}: ${rawCredit}`);
+      const hasDebit=debit!==null&&debit!==0;
+      const hasCredit=credit!==null&&credit!==0;
+      if(hasDebit===hasCredit) throw new Error(`CSV-regel ${i+1} moet precies één van debet of credit bevatten.`);
+      if(hasDebit){parsed=Math.abs(debit as number);inferredDirection='expense';}
+      else {parsed=Math.abs(credit as number);inferredDirection='income';}
+    } else {
+      if(!rawAmount) continue;
+      parsed=parseDutchAmount(rawAmount);
+      if(parsed===null) throw new Error(`Ongeldig bedrag op CSV-regel ${i+1}: ${rawAmount}`);
+      if(parsed!==0){
+        const income=['bij','income','inkomsten','credit','cr','c'].includes(rawDirection);
+        const expense=['af','expense','uitgaven','debit','dr','d'].includes(rawDirection);
+        if(income&&expense) throw new Error(`CSV heeft tegenstrijdige transactierichting op regel ${i+1}.`);
+        if(income) inferredDirection='income';
+        else if(expense) inferredDirection='expense';
+        else if(/^(?:-|\()/.test(rawAmount)) inferredDirection='expense';
+        else if(/^\+/.test(rawAmount)) inferredDirection='income';
+        else throw new Error(`Onbekende transactierichting op CSV-regel ${i+1}: ${rawDirection||'(leeg)'}`);
+      }
+    }
+    if(parsed===null||parsed===0) continue;
     const amount=Math.abs(parsed);
+    const type=inferredDirection;
+    if(!type) throw new Error(`Onbekende transactierichting op CSV-regel ${i+1}: ${rawDirection||'(leeg)'}`);
     const base=genereerStabielTransactieId({date,description:description||'Transactie',amount_incl:amount,tegenrekening_iban:iban||undefined});
     const occurrence=(seen.get(base)??0)+1; seen.set(base,occurrence);
     const rawExcl=submittedExclIdx>=0?String(row[submittedExclIdx]??'').trim():'';
@@ -55,7 +83,7 @@ export function parseCsvToRawTransactions(csvContent: string): RawTransaction[] 
     if(rawVat&&parsedVat===null) throw new Error(`Ongeldig btw-bedrag op CSV-regel ${i+1}: ${rawVat}`);
     if(rawRate&&![0,9,21].includes(parsedRate??-1)) throw new Error(`Ongeldig btw-tarief op CSV-regel ${i+1}: ${rawRate}%`);
     const submittedSection=submittedSectionIdx>=0?String(row[submittedSectionIdx]??'').trim()||undefined:undefined;
-    output.push({id:occurrence===1?base:`${base}_${occurrence}`,date:date||undefined,description:description||'Transactie',memo:memo||undefined,amount_incl:amount,type:income?'income':'expense',tegenrekening_iban:iban||undefined,submitted_amount_excl:parsedExcl??undefined,submitted_vat_amount:parsedVat??undefined,submitted_vat_percentage:parsedRate as BtwPercentage|undefined,submitted_section:submittedSection});
+    output.push({id:occurrence===1?base:`${base}_${occurrence}`,date:date||undefined,description:description||'Transactie',memo:memo||undefined,amount_incl:amount,type,tegenrekening_iban:iban||undefined,submitted_amount_excl:parsedExcl??undefined,submitted_vat_amount:parsedVat??undefined,submitted_vat_percentage:parsedRate as BtwPercentage|undefined,submitted_section:submittedSection});
   }
   return output;
 }
