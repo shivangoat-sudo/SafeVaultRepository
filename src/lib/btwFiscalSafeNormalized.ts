@@ -42,8 +42,6 @@ function isBankOnlyAmbiguous(row: import('./btwSafeTypes').RawTransaction): bool
   const retailMention = /\b(?:albert\s+heijn|jumbo|plus|lidl|aldi|supermarkt|slijterij|drankenspeciaalzaak)\b/i.test(text);
   const retailSpecific = /(?:9\s*%|21\s*%|0\s*%|geneesmiddelen?|medicijnen?|voedingsmiddelen?|alcohol|wijn|bier|sterke\s+drank)/i.test(text);
 
-  // Do not use \b around accented words such as "café". JS word boundaries are
-  // ASCII-centric and can therefore fail between é and whitespace.
   const horecaMention = /(?:café|cafe|grand\s+café|grand\s+cafe|restaurant|horeca|hotelrestaurant)/i.test(text);
   const horecaSpecificRate = /(?:9\s*%|21\s*%|0\s*%)/i.test(text);
   const horecaAlcohol = /(?:alcohol|wijn|bier|sterke\s+drank|borrel|cocktail|pils)/i.test(text);
@@ -86,7 +84,8 @@ function maskAmbiguousRows(rows: import('./btwSafeTypes').RawTransaction[]): {
  * Insurance premiums are VAT-exempt, but other insurer services can be taxable.
  * We therefore use a strict premium/insurance pattern and mask the raw text
  * before the generic 21% fallback layer can see the merchant word "verzekering".
- * The original bank description is restored after fiscal classification.
+ * The masked marker explicitly contains the fiscal fact "vrijgesteld" so the
+ * existing safe core can classify it without inventing a rate.
  */
 function isClearlyExemptInsurance(row: import('./btwSafeTypes').RawTransaction): boolean {
   if (row.type !== 'expense') return false;
@@ -105,7 +104,7 @@ function maskClearlyExemptInsuranceRows(rows: import('./btwSafeTypes').RawTransa
     originalTextById.set(row.id, { description: row.description, memo: row.memo });
     return {
       ...row,
-      description: '[SafeVault: vrijgestelde fiscale premie]',
+      description: '[SafeVault: vrijgesteld verzekeringspremie]',
       memo: '',
     };
   });
