@@ -10,13 +10,13 @@ const expect = (condition: unknown, message: string) => {
 };
 
 const baseRows = [
-  { id: 'insurance-1', date: '2026-01-05', description: 'Aansprakelijkheidsverzekering premie', memo: '', type: 'expense' as const, amount_incl_input: 121, rawAmount: 121 },
-  { id: 'insurance-2', date: '2026-02-05', description: 'Zorgverzekering premie', memo: '', type: 'expense' as const, amount_incl_input: 160, rawAmount: 160 },
-  { id: 'insurance-3', date: '2026-03-05', description: 'Beroepsaansprakelijkheidsverzekering', memo: 'premie maart', type: 'expense' as const, amount_incl_input: 242, rawAmount: 242 },
-  { id: 'taxable-insurer-service', date: '2026-04-05', description: 'Verzekeraar onderhoudscontract administratie', memo: '', type: 'expense' as const, amount_incl_input: 121, rawAmount: 121 },
-  { id: 'openai-1', date: '2026-05-05', description: 'OpenAI LLC', memo: 'zakelijke software', type: 'expense' as const, amount_incl_input: 121, rawAmount: 121 },
-  { id: 'food-1', date: '2026-06-05', description: 'Albert Heijn Zakelijk voedingsmiddelen', memo: '', type: 'expense' as const, amount_incl_input: 109, rawAmount: 109 },
-  { id: 'ambiguous-1', date: '2026-07-05', description: 'Algemene betaling', memo: '', type: 'expense' as const, amount_incl_input: 121, rawAmount: 121 },
+  { id: 'insurance-1', date: '2026-01-05', description: 'Aansprakelijkheidsverzekering premie', memo: '', type: 'expense' as const, amount_incl: 121 },
+  { id: 'insurance-2', date: '2026-02-05', description: 'Zorgverzekering premie', memo: '', type: 'expense' as const, amount_incl: 160 },
+  { id: 'insurance-3', date: '2026-03-05', description: 'Beroepsaansprakelijkheidsverzekering', memo: 'premie maart', type: 'expense' as const, amount_incl: 242 },
+  { id: 'taxable-insurer-service', date: '2026-04-05', description: 'Verzekeraar onderhoudscontract administratie', memo: '', type: 'expense' as const, amount_incl: 121 },
+  { id: 'openai-1', date: '2026-05-05', description: 'OpenAI LLC', memo: 'zakelijke software', type: 'expense' as const, amount_incl: 121 },
+  { id: 'food-1', date: '2026-06-05', description: 'Albert Heijn Zakelijk voedingsmiddelen', memo: '', type: 'expense' as const, amount_incl: 109 },
+  { id: 'ambiguous-1', date: '2026-07-05', description: 'Algemene betaling', memo: '', type: 'expense' as const, amount_incl: 121 },
 ];
 
 const report = calculateFiscalVatReport(baseRows);
@@ -25,14 +25,14 @@ const byId = new Map(report.transactions.map((tx) => [tx.id, tx]));
 for (const id of ['insurance-1', 'insurance-2', 'insurance-3']) {
   const tx = byId.get(id) ?? fail(`insurance transaction missing: ${id}`);
   expect(tx.classification === 'exempt_input', `${id} must be exempt_input, got ${tx.classification}`);
-  expect(tx.rate === 0, `${id} must have 0% rate`);
+  expect(tx.vat.status === 'known' && tx.vat.rate === 0, `${id} must have known 0% VAT`);
   expect(tx.includedInTotals === true, `${id} must remain represented in totals/audit`);
   expect(tx.deductible === false, `${id} must not be deductible input VAT`);
 }
 
 const taxableInsurer = byId.get('taxable-insurer-service') ?? fail('taxable insurer service missing');
 expect(taxableInsurer.classification === 'domestic_input_21', `maintenance service must stay taxable, got ${taxableInsurer.classification}`);
-expect(taxableInsurer.rate === 21, 'maintenance service must be 21%');
+expect(taxableInsurer.vat.status === 'known' && taxableInsurer.vat.rate === 21, 'maintenance service must be known 21%');
 
 const ambiguous = byId.get('ambiguous-1') ?? fail('ambiguous row missing');
 expect(ambiguous.classification === 'unresolved', `ambiguous row must stay unresolved, got ${ambiguous.classification}`);
