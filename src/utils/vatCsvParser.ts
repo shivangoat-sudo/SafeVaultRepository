@@ -20,7 +20,7 @@ export function parseCsvToRawTransactions(csvContent: string): RawTransaction[] 
   const counterpartyIdx=findIdx(['tegenrekening','iban','counterparty iban','rekeningnummer']);
   const directionIdx=findIdx(['af bij','af/bij','direction','type','credit debit','debit credit']);
   const amountIdx=findIdx(['bedrag','amount','transaction amount','waarde']);
-  const debitIdx=findExactIdx(['debit','debitering','afgeschreven','withdrawal','uitgaand']);
+  const debitIdx=findExactIdx(['debit','debet','debitering','afgeschreven','withdrawal','uitgaand']);
   const creditIdx=findExactIdx(['credit','creditering','bijgeschreven','deposit','inkomend']);
   const memoIdx=findIdx(['mededelingen','memo','opmerking','notes','message']);
   const submittedExclIdx=findIdx(['bedrag excl btw','bedrag exclusief btw','amount excl vat','netto bedrag','grondslag']);
