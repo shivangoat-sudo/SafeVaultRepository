@@ -82,10 +82,7 @@ function maskAmbiguousRows(rows: import('./btwSafeTypes').RawTransaction[]): {
 /**
  * Some bank descriptions contain an unambiguous insurance-premium signal.
  * Insurance premiums are VAT-exempt, but other insurer services can be taxable.
- * We therefore use a strict premium/insurance pattern and mask the raw text
- * before the generic 21% fallback layer can see the merchant word "verzekering".
- * The masked marker explicitly contains the fiscal fact "vrijgesteld" so the
- * existing safe core can classify it without inventing a rate.
+ * We keep this strict: a generic insurer/insurance merchant name is not enough.
  */
 function isClearlyExemptInsurance(row: import('./btwSafeTypes').RawTransaction): boolean {
   if (row.type !== 'expense') return false;
@@ -118,6 +115,67 @@ function mergeOriginalTexts(
   const merged = new Map(first);
   for (const [id, value] of second) merged.set(id, value);
   return merged;
+}
+
+function applyClearlyExemptInsuranceClassifications(report: FiscalReport, sourceRows: import('./btwSafeTypes').RawTransaction[]): FiscalReport {
+  const sourceById = new Map(sourceRows.map((row) => [row.id, row]));
+  const matchedIds = new Set(
+    sourceRows.filter(isClearlyExemptInsurance).map((row) => row.id),
+  );
+  if (!matchedIds.size) return report;
+
+  const transactions = report.transactions.map((tx): FiscalTransaction => {
+    if (!matchedIds.has(tx.id)) return tx;
+    const source = sourceById.get(tx.id);
+    if (!source) return tx;
+    return {
+      ...tx,
+      classification: 'exempt_input',
+      section: '5b',
+      amount_excl: Number(source.amount_incl.toFixed(2)),
+      vat: { status: 'known', rate: 0, amount: 0 },
+      deductible: false,
+      evidenceRequired: false,
+      evidenceStatus: 'not_required',
+      confidence: 'high',
+      includedInTotals: true,
+      reason: 'Verzekeringspremie herkend als btw-vrijgestelde premie; geen btw-bedrag uit de banktransactie gefabriceerd.',
+      rule: {
+        ...tx.rule,
+        classification: 'exempt_input',
+        section: '5b',
+        wetsbasis: 'Belastingdienst – Vrijstelling voor verzekeringen en diensten door tussenpersonen',
+        explanation: 'Verzekeringspremie: btw-vrijgesteld; andere verzekeraar-diensten kunnen wel belast zijn.',
+        requiresEvidence: false,
+      },
+      transactie_id: tx.transactie_id,
+      omschrijving: source.description ?? tx.omschrijving,
+      bedrag: Number(source.amount_incl.toFixed(2)),
+      btw: 0,
+      toegepaste_regel: 'Verzekeringspremie: vrijgesteld van btw.',
+    };
+  });
+
+  const known = transactions.filter((tx) => tx.classification !== 'unresolved').length;
+  const unresolved = transactions.filter((tx) => tx.classification === 'unresolved').length;
+  const included = transactions.filter((tx) => tx.includedInTotals).length;
+
+  return {
+    ...report,
+    transactions,
+    audit: {
+      ...report.audit,
+      known,
+      unresolved,
+      included,
+      problems: unresolved === 0
+        ? report.audit.problems.filter((problem) => !/vereisen boekhoudkundige beoordeling voordat het rapport fiscaal compleet is/i.test(problem))
+        : report.audit.problems,
+      ok: unresolved === 0
+        ? report.audit.problems.filter((problem) => !/vereisen boekhoudkundige beoordeling voordat het rapport fiscaal compleet is/i.test(problem)).length === 0
+        : report.audit.ok,
+    },
+  };
 }
 
 function restoreOriginalText(
@@ -192,11 +250,12 @@ export function calculateFiscalVatReport(
   const classifierRows = insurance.rows;
   const originalTextById = mergeOriginalTexts(ambiguous.originalTextById, insurance.originalTextById);
   const report = calculateProductionVatReport(classifierRows, overrides, adjustments);
+  const insuranceClassified = applyClearlyExemptInsuranceClassifications(report, rows);
   const restored = restoreOriginalText({
-    ...report,
+    ...insuranceClassified,
     overzicht: {
-      ...report.overzicht,
-      status: report.overzicht.status === 'af_te_drager' ? 'af_te_dragen' : 'terug_te_vorderen',
+      ...insuranceClassified.overzicht,
+      status: insuranceClassified.overzicht.status === 'af_te_drager' ? 'af_te_dragen' : 'terug_te_vorderen',
     },
   }, originalTextById);
   return rebuildAuditState(addEvidenceState(restored));
