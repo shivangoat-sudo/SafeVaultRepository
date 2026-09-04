@@ -62,21 +62,37 @@ function isBankOnlyAmbiguous(row: import('./btwSafeTypes').RawTransaction): bool
   );
 }
 
-function maskAmbiguousRows(rows: import('./btwSafeTypes').RawTransaction[]): {
+function hasContradictoryFiscalEvidence(row: import('./btwSafeTypes').RawTransaction): boolean {
+  const text = normalizedText(row);
+  if (!text) return false;
+  const rates = new Set<number>();
+  for (const match of text.matchAll(/(?:^|[^0-9])(0|9|21)\s*%(?:[^0-9]|$)/gi)) rates.add(Number(match[1]));
+  if (rates.size > 1) return true;
+  const reverse = /\b(?:btw\s*verlegd|btw-verlegd|verlegde btw|reverse\s*charge)\b/i.test(text);
+  const exemption = /\b(?:vrijgesteld|vrijstelling|btw-vrij)\b/i.test(text);
+  if (reverse && (rates.size > 0 || exemption)) return true;
+  if (exemption && rates.size > 0) return true;
+  return false;
+}
+
+function maskRowsByPredicate(rows: import('./btwSafeTypes').RawTransaction[], predicate: (row: import('./btwSafeTypes').RawTransaction) => boolean, marker: string): {
   rows: import('./btwSafeTypes').RawTransaction[];
   originalTextById: Map<string, { description?: string; memo?: string }>;
 } {
   const originalTextById = new Map<string, { description?: string; memo?: string }>();
   const masked = rows.map((row) => {
-    if (!isBankOnlyAmbiguous(row)) return row;
+    if (!predicate(row)) return row;
     originalTextById.set(row.id, { description: row.description, memo: row.memo });
-    return {
-      ...row,
-      description: '[SafeVault: ambigue bankomschrijving - geen automatische fiscale classificatie]',
-      memo: '',
-    };
+    return { ...row, description: marker, memo: '' };
   });
   return { rows: masked, originalTextById };
+}
+
+function maskAmbiguousRows(rows: import('./btwSafeTypes').RawTransaction[]): {
+  rows: import('./btwSafeTypes').RawTransaction[];
+  originalTextById: Map<string, { description?: string; memo?: string }>;
+} {
+  return maskRowsByPredicate(rows, isBankOnlyAmbiguous, '[SafeVault: ambigue bankomschrijving - geen automatische fiscale classificatie]');
 }
 
 function isClearlyExemptInsurance(row: import('./btwSafeTypes').RawTransaction): boolean {
@@ -90,25 +106,17 @@ function maskClearlyExemptInsuranceRows(rows: import('./btwSafeTypes').RawTransa
   rows: import('./btwSafeTypes').RawTransaction[];
   originalTextById: Map<string, { description?: string; memo?: string }>;
 } {
-  const originalTextById = new Map<string, { description?: string; memo?: string }>();
-  const masked = rows.map((row) => {
-    if (!isClearlyExemptInsurance(row)) return row;
-    originalTextById.set(row.id, { description: row.description, memo: row.memo });
-    return {
-      ...row,
-      description: '[SafeVault: vrijgesteld verzekeringspremie]',
-      memo: '',
-    };
-  });
-  return { rows: masked, originalTextById };
+  return maskRowsByPredicate(rows, isClearlyExemptInsurance, '[SafeVault: vrijgesteld verzekeringspremie]');
 }
 
 function mergeOriginalTexts(
   first: Map<string, { description?: string; memo?: string }>,
   second: Map<string, { description?: string; memo?: string }>,
+  third: Map<string, { description?: string; memo?: string }>,
 ): Map<string, { description?: string; memo?: string }> {
   const merged = new Map(first);
   for (const [id, value] of second) merged.set(id, value);
+  for (const [id, value] of third) merged.set(id, value);
   return merged;
 }
 
@@ -159,14 +167,7 @@ function applyClearlyExemptInsuranceClassifications(report: CoreFiscalReport, so
   return {
     ...report,
     transactions,
-    audit: {
-      ...report.audit,
-      known,
-      unresolved,
-      included,
-      problems,
-      ok: problems.length === 0,
-    },
+    audit: { ...report.audit, known, unresolved, included, problems, ok: problems.length === 0 },
   };
 }
 
@@ -215,18 +216,13 @@ function addEvidenceState(report: FiscalReport): FiscalReport {
   return {
     ...report,
     transactions,
-    audit: {
-      ...report.audit,
-      evidenceRequired: transactions.filter((tx) => tx.evidenceRequired).length,
-    },
+    audit: { ...report.audit, evidenceRequired: transactions.filter((tx) => tx.evidenceRequired).length },
   };
 }
 
 function rebuildAuditState(report: FiscalReport): FiscalReport {
   const problems = report.audit.problems.filter((problem) => {
-    if (report.audit.unresolved === 0 && /vereisen boekhoudkundige beoordeling voordat het rapport fiscaal compleet is/i.test(problem)) {
-      return false;
-    }
+    if (report.audit.unresolved === 0 && /vereisen boekhoudkundige beoordeling voordat het rapport fiscaal compleet is/i.test(problem)) return false;
     return true;
   });
   return { ...report, audit: { ...report.audit, problems, ok: problems.length === 0 } };
@@ -237,10 +233,11 @@ export function calculateFiscalVatReport(
   overrides: Record<string, BoekhouderBeoordeling> = {},
   adjustments: FiscalAdjustments = {},
 ): FiscalReport {
-  const ambiguous = maskAmbiguousRows(rows);
+  const contradictory = maskRowsByPredicate(rows, hasContradictoryFiscalEvidence, '[SafeVault: tegenstrijdige fiscale signalen - geen automatische classificatie]');
+  const ambiguous = maskAmbiguousRows(contradictory.rows);
   const insurance = maskClearlyExemptInsuranceRows(ambiguous.rows);
   const classifierRows = insurance.rows;
-  const originalTextById = mergeOriginalTexts(ambiguous.originalTextById, insurance.originalTextById);
+  const originalTextById = mergeOriginalTexts(contradictory.originalTextById, ambiguous.originalTextById, insurance.originalTextById);
   const report = calculateProductionVatReport(classifierRows, overrides, adjustments);
   const insuranceClassifiedCore = applyClearlyExemptInsuranceClassifications(report, rows);
   const insuranceClassified: FiscalReport = {
@@ -257,9 +254,7 @@ export function calculateFiscalVatReport(
 export function tweeKolommenWeergave(report: FiscalReport) {
   return {
     zeker: report.transactions.filter((t) => t.includedInTotals && t.confidence === 'high'),
-    twijfelgevallen: report.transactions.filter(
-      (t) => t.classification === 'unresolved' || (!t.includedInTotals && t.confidence === 'low'),
-    ),
+    twijfelgevallen: report.transactions.filter((t) => t.classification === 'unresolved' || (!t.includedInTotals && t.confidence === 'low')),
   };
 }
 
