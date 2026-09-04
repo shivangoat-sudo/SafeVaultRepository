@@ -32,11 +32,10 @@ function toCoreReport(report: FiscalReport): CoreFiscalReport {
 }
 
 function addEvidenceState(report: FiscalReport): FiscalReport {
-  const transactions = report.transactions.map((tx) => {
-    // A bank transaction is enough to START calculation/classification. For a
-    // normal input-VAT claim, however, documentary support is still required.
-    // Keep that as a separate status so it cannot turn into a manual
-    // classification request or block the calculation itself.
+  const transactions: FiscalTransaction[] = report.transactions.map((tx) => {
+    // Bankgegevens zijn voldoende om de transactieanalyse en btw-berekening
+    // te starten. Voor een definitieve 5b-claim kan bewijs/documentatie nog wel
+    // vereist zijn. Dat mag nooit veranderen in een handmatige classificatietaak.
     const needsDocument =
       tx.type === 'expense' &&
       tx.deductible &&
@@ -46,9 +45,16 @@ function addEvidenceState(report: FiscalReport): FiscalReport {
         tx.classification === 'eu_reverse_charge' ||
         tx.classification === 'non_eu_reverse_charge');
 
-    return needsDocument
-      ? { ...tx, evidenceRequired: true, evidenceStatus: tx.evidenceStatus === 'human_confirmed' ? 'human_confirmed' : 'required' as const }
-      : tx;
+    if (!needsDocument) return tx;
+
+    const evidenceStatus: FiscalTransaction['evidenceStatus'] =
+      tx.evidenceStatus === 'human_confirmed' ? 'human_confirmed' : 'required';
+
+    return {
+      ...tx,
+      evidenceRequired: true,
+      evidenceStatus,
+    };
   });
 
   const evidenceRequired = transactions.filter((tx) => tx.evidenceRequired).length;
@@ -75,10 +81,9 @@ export function calculateFiscalVatReport(
 }
 
 /**
- * "Twijfelgevallen" means fiscal classification could not be established.
- * Evidence/document requirements are deliberately kept separate: a missing
- * invoice may affect the final deductibility proof, but it must never force
- * the bookkeeper to classify a transaction that SafeVault already classified.
+ * "Twijfelgevallen" betekent dat de fiscale classificatie niet zelfstandig
+ * kon worden vastgesteld. Een ontbrekend document maakt geen twijfelgeval van
+ * een transactie die SafeVault al fiscaal heeft geclassificeerd.
  */
 export function tweeKolommenWeergave(report: FiscalReport) {
   return {
