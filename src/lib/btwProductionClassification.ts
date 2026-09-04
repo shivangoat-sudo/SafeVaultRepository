@@ -3,7 +3,6 @@ import type { BoekhouderBeoordeling, FiscalAdjustments, FiscalClassification, Fi
 import type { RawTransaction } from './btwSafeTypes';
 
 /** Production transaction-context bridge. Bank rows are the calculation source; customer summary totals are never trusted. */
-const countryOf = (row: RawTransaction) => String(row.tegenrekening_iban ?? '').replace(/\s/g, '').toUpperCase().slice(0, 2);
 const textOf = (row: RawTransaction) => `${row.description ?? ''} ${row.memo ?? ''}`.replace(/\s+/g, ' ').trim();
 const hasFiscalSignal = (text: string) => /(?:^|[^0-9])(?:0|9|21)\s*%|\b(?:btw\s*verlegd|btw-verlegd|reverse\s*charge|vrijgesteld|vrijstelling|btw-vrij)\b/i.test(text);
 const mark = (row: RawTransaction, marker: string): RawTransaction => ({ ...row, description: `${String(row.description ?? '').trim()} [SafeVault context: ${marker}]` });
@@ -57,8 +56,6 @@ function patchKnownContexts(report: FiscalReport, sourceRows: RawTransaction[]):
 
   const transactions = report.transactions.map((tx): FiscalTransaction => {
     const source = sourceById.get(tx.id);
-    // Keep fail-closed behavior for genuinely unknown rows, but known supplier
-    // identity is allowed to upgrade an unresolved/core-misclassified row.
     const text = `${source ? textOf(source) : ''} ${tx.description ?? ''} ${tx.omschrijving ?? ''}`.toLowerCase();
     const isNonEuSupplier = /\bopenai(?:\s+llc)?\b|\belevenlabs(?:\s+inc)?\b|\banthropic(?:\s+pbc)?\b|\bnetlify(?:\s+inc)?\b|\bgit(?:hub|hub\s+inc)\b|\bresend(?:\s+inc)?\b/i.test(text);
     const isEuSupplier = /\badobe\s+systems?\s+software\b|\bapple\s+distribution\s+international\b|\bgoogle\s+cloud\s+emea\b/i.test(text);
@@ -84,14 +81,6 @@ function patchKnownContexts(report: FiscalReport, sourceRows: RawTransaction[]):
       aangifte['4b'].grondslag = round2(aangifte['4b'].grondslag + excl); aangifte['4b'].btw = round2(aangifte['4b'].btw + vat);
       output.euReverse = round2(output.euReverse + vat); output.total = round2(output.total + vat);
       input.reverseCharge = round2(input.reverseCharge + vat); input.total = round2(input.total + vat);
-    } else if (/postnl\s+pakketten?|pakketten?\s+postnl/i.test(text)) {
-      classification = 'domestic_input_21'; rate = 21; vat = grossVat(tx.amount_incl_input, 21); excl = netFromGross(tx.amount_incl_input, 21); section = '5b';
-      explanation = 'Pakketdienst van PostNL; belastbare pakketdienst tegen het algemene 21%-tarief.';
-      input.domestic21 = round2(input.domestic21 + vat); input.total = round2(input.total + vat); aangifte['5b'] = round2(aangifte['5b'] + vat);
-    } else if (/path[eé]/i.test(text)) {
-      classification = 'domestic_input_9'; rate = 9; vat = grossVat(tx.amount_incl_input, 9); excl = netFromGross(tx.amount_incl_input, 9); section = '5b';
-      explanation = 'Toegang tot een bioscoop valt onder het 9%-tarief.';
-      input.domestic9 = round2(input.domestic9 + vat); input.total = round2(input.total + vat); aangifte['5b'] = round2(aangifte['5b'] + vat);
     } else if (/(?:café|cafe|grand café|grand cafe)/i.test(text)) {
       classification = 'horeca_bua_9'; rate = 9; vat = grossVat(tx.amount_incl_input, 9); excl = netFromGross(tx.amount_incl_input, 9); section = '5b';
       explanation = 'Horeca-uitgave: btw op eten en drinken in een horecagelegenheid is niet aftrekbaar als voorbelasting.';
@@ -102,6 +91,14 @@ function patchKnownContexts(report: FiscalReport, sourceRows: RawTransaction[]):
     } else if (/kvk\s+inschrijfvergoeding|kamer\s+van\s+koophandel/i.test(text)) {
       classification = 'exempt_input'; rate = 0; vat = 0; excl = round2(tx.amount_incl_input); section = '5b';
       explanation = 'KVK-inschrijfvergoeding wordt zonder btw als zakelijke uitgave verwerkt; er wordt geen voorbelasting gefabriceerd.';
+    } else if (/postnl\s+pakketten?|pakketten?\s+postnl/i.test(text)) {
+      classification = 'domestic_input_21'; rate = 21; vat = grossVat(tx.amount_incl_input, 21); excl = netFromGross(tx.amount_incl_input, 21); section = '5b';
+      explanation = 'Pakketdienst van PostNL; belastbare pakketdienst tegen het algemene 21%-tarief.';
+      input.domestic21 = round2(input.domestic21 + vat); input.total = round2(input.total + vat); aangifte['5b'] = round2(aangifte['5b'] + vat);
+    } else if (/path[eé]/i.test(text)) {
+      classification = 'domestic_input_9'; rate = 9; vat = grossVat(tx.amount_incl_input, 9); excl = netFromGross(tx.amount_incl_input, 9); section = '5b';
+      explanation = 'Toegang tot een bioscoop valt onder het 9%-tarief.';
+      input.domestic9 = round2(input.domestic9 + vat); input.total = round2(input.total + vat); aangifte['5b'] = round2(aangifte['5b'] + vat);
     } else if (/albert\s+heijn\s+zakelijk/i.test(text)) {
       classification = 'domestic_input_9'; rate = 9; vat = grossVat(tx.amount_incl_input, 9); excl = netFromGross(tx.amount_incl_input, 9); section = '5b';
       explanation = 'Voedingsmiddelen voor menselijke consumptie vallen in beginsel onder het 9%-tarief.';
@@ -119,9 +116,13 @@ function patchKnownContexts(report: FiscalReport, sourceRows: RawTransaction[]):
   });
 
   if (!changed) return report;
-  const audit = { ...report.audit, known: report.audit.known + changed, unresolved: Math.max(0, report.audit.unresolved - changed), included: report.audit.included + changed };
+  const known = transactions.filter(t => t.vat.status === 'known').length;
+  const unresolved = transactions.filter(t => t.vat.status === 'unknown').length;
+  const included = transactions.filter(t => t.includedInTotals).length;
+  const audit = { ...report.audit, known, unresolved, included, evidenceRequired: transactions.filter(t => t.evidenceRequired).length };
   const netto = round2(output.total - input.total);
-  return { ...report, transactions, overzicht: { ...report.overzicht, output, input, nonDeductible, netto, status: netto >= 0 ? 'af_te_drager' : 'terug_te_vorderen' }, aangifte: { ...aangifte, '5a': round2(output.total), '5b': round2(input.total) }, audit: { ...audit, ok: audit.unresolved === 0 && audit.problems.filter(p => !/onvoldoende|unresolved|twijfel/i.test(p)).length === 0, problems: audit.problems.filter(p => !/onvoldoende|unresolved|twijfel/i.test(p)) } };
+  const remainingProblems = audit.problems.filter(p => !/onvoldoende|unresolved|twijfel/i.test(p));
+  return { ...report, transactions, overzicht: { ...report.overzicht, output, input, nonDeductible, netto, status: netto >= 0 ? 'af_te_drager' : 'terug_te_vorderen' }, aangifte: { ...aangifte, '5a': round2(output.total), '5b': round2(input.total) }, audit: { ...audit, ok: unresolved === 0 && remainingProblems.length === 0, problems: remainingProblems } };
 }
 
 export function calculateProductionVatReport(rows: RawTransaction[], overrides: Record<string, BoekhouderBeoordeling> = {}, adjustments: FiscalAdjustments = {}): FiscalReport {
