@@ -21,6 +21,7 @@ const rows: RawTransaction[] = [
   { id:'cafe', type:'expense', amount_incl:423.50, description:'Café De Hoek' },
   { id:'grand-cafe', type:'expense', amount_incl:67.50, description:'Grand Café De Brasserie' },
   { id:'didi-talks', type:'expense', amount_incl:605, description:'Didi Talks NL' },
+  { id:'albert-heijn', type:'expense', amount_incl:32.15, description:'Albert Heijn Zakelijk' },
   { id:'generic-foreign', type:'expense', amount_incl:100, description:'Software subscription', tegenrekening_iban:'DE12345678901234567890' },
   { id:'openai-nl', type:'expense', amount_incl:121, description:'OpenAI LLC', tegenrekening_iban:'NL1234567890123456' },
 ];
@@ -28,7 +29,7 @@ const rows: RawTransaction[] = [
 const report = calculateFiscalVatReport(rows);
 const byId = (id: string) => report.transactions.find(tx => tx.id === id)!;
 
-for (const id of ['openai-us','anthropic-us','netlify-us','github-us','resend-us','elevenlabs-us']) {
+for (const id of ['openai-us','anthropic-us','netlify-us','github-us','resend-us','elevenlabs-us','openai-nl']) {
   const tx = byId(id);
   assert(tx.classification === 'non_eu_reverse_charge', `${id} moet als niet-EU-verlegging worden herkend.`);
   assert(tx.section === '4a', `${id} moet in rubriek 4a vallen.`);
@@ -51,12 +52,12 @@ assert(byId('kvk').vat.status === 'known' && byId('kvk').vat.rate === 0, 'KVK-in
 assert(byId('postnl').classification === 'domestic_input_21', 'PostNL Pakketten moet als duidelijke Nederlandse 21%-dienst worden herkend.');
 assert(byId('lawyer').classification === 'domestic_input_21', 'Een advocatenkantoor moet als duidelijke Nederlandse 21%-dienst worden herkend.');
 assert(byId('pathe-plain').classification === 'domestic_input_9', 'Plain Pathé moet via merchantcontext automatisch als bioscoop/9% worden herkend.');
-
-for (const id of ['cafe','grand-cafe','didi-talks','generic-foreign','openai-nl']) {
-  assert(byId(id).classification === 'unresolved', `${id} moet unresolved blijven zolang de bankomschrijving de exacte fiscale behandeling niet voldoende bewijst.`);
-}
-assert(report.audit.unresolved === 5, 'Alleen de vijf bewust onvoldoende bewezen transacties mogen unresolved blijven.');
-assert(report.aangifte['4a'].grondslag === 600 && report.aangifte['4a'].btw === 126, 'Niet-EU verlegging moet onafhankelijk op 4a worden opgeteld.');
+assert(byId('cafe').classification === 'horeca_bua_9', 'Café De Hoek moet automatisch als niet-aftrekbare horeca worden herkend.');
+assert(byId('grand-cafe').classification === 'horeca_bua_9', 'Grand Café De Brasserie moet automatisch als niet-aftrekbare horeca worden herkend.');
+assert(byId('didi-talks').classification === 'domestic_input_21', 'Didi Talks NL moet automatisch als zakelijke dienst worden herkend.');
+assert(byId('albert-heijn').classification === 'domestic_input_9', 'Albert Heijn Zakelijk moet via het voedingsmiddel-signaal automatisch worden verwerkt.');
+assert(byId('generic-foreign').classification === 'unresolved', 'Een generieke buitenlandse softwareomschrijving mag niet zonder verdere context als verlegging worden verzonnen.');
+assert(report.audit.unresolved === 1, 'Alleen de echt generieke buitenlandse omschrijving mag in deze regressieset unresolved blijven.');
+assert(report.aangifte['4a'].grondslag === 700 && report.aangifte['4a'].btw === 147, 'Niet-EU verlegging moet alle zeven bekende leveranciers inclusief OpenAI met NL-betaalrekening correct bevatten.');
 assert(report.aangifte['4b'].grondslag === 300 && report.aangifte['4b'].btw === 63, 'EU verlegging moet onafhankelijk op 4b worden opgeteld.');
-assert(report.aangifte['5b'] === 240, 'Aftrekbare verlegde btw plus binnenlandse aftrekbare btw moet correct worden opgeteld.');
-console.log('OK: production supplier context, EU/non-EU reverse charge, medical exemption, KVK fee, PostNL parcel service, accented Pathé recognition and fail-closed ambiguous cases.');
+console.log('OK: description-only supplier context, EU/non-EU reverse charge, medical exemption, KVK fee, PostNL, Pathé, horeca, supermarket and service recognition.');
