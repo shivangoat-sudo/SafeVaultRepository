@@ -12,7 +12,6 @@ import type {
 } from './btwFiscalSafeCore';
 import {
   BOEKHOUDER_PERCENTAGE_OPTIES,
-  tweeKolommenWeergave as coreTweeKolommenWeergave,
   berekenBetrouwbaarheidsscore as coreBerekenBetrouwbaarheidsscore,
 } from './btwFiscalSafeCore';
 
@@ -47,8 +46,19 @@ export function calculateFiscalVatReport(
   };
 }
 
+/**
+ * "Twijfelgevallen" means fiscal classification could not be established.
+ * Evidence/document requirements are deliberately kept separate: a missing
+ * invoice may affect the final deductibility proof, but it must never force
+ * the bookkeeper to classify a transaction that SafeVault already classified.
+ */
 export function tweeKolommenWeergave(report: FiscalReport) {
-  return coreTweeKolommenWeergave(toCoreReport(report));
+  return {
+    zeker: report.transactions.filter(t => t.includedInTotals && t.confidence === 'high'),
+    twijfelgevallen: report.transactions.filter(
+      t => t.classification === 'unresolved' || (!t.includedInTotals && t.confidence === 'low'),
+    ),
+  };
 }
 
 export function berekenBetrouwbaarheidsscore(report: FiscalReport) {
