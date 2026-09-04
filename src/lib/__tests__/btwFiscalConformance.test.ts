@@ -94,7 +94,8 @@ for (const row of ambiguousRows) {
 }
 assert.equal(ambiguousView.twijfelgevallen.length, ambiguousRows.length);
 assert.equal(ambiguousReport.audit.unresolved, ambiguousRows.length);
-assert.equal(ambiguousReport.audit.problems.length, ambiguousRows.length);
+assert.equal(ambiguousReport.audit.problems.length, 1);
+assert.match(ambiguousReport.audit.problems[0], /5 transactie\(s\) vereisen boekhoudkundige beoordeling/);
 
 const explicitRows = calculateFiscalVatReport([
   expense('foodExplicit', 'Albert Heijn Zakelijk voedingsmiddelen 9%', 32.15),
