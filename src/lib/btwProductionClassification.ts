@@ -71,6 +71,7 @@ function patchKnownContexts(report: FiscalReport, sourceRows: RawTransaction[]):
   const transactions = report.transactions.map((tx): FiscalTransaction => {
     const source = sourceById.get(tx.id);
     const text = `${source ? textOf(source) : ''} ${tx.description ?? ''} ${tx.omschrijving ?? ''}`.toLowerCase();
+    if (/\[safevault:\s*(?:tegenstrijdige fiscale signalen|ambigue bankomschrijving)/i.test(text)) return tx;
     const isNonEuSupplier = /\bopenai(?:\s+llc)?\b|\belevenlabs(?:\s+inc)?\b|\banthropic(?:\s+pbc)?\b|\bnetlify(?:\s+inc)?\b|\bgit(?:hub|hub\s+inc)?\b|\bresend(?:\s+inc)?\b/i.test(text);
     const isEuSupplier = /\badobe\s+systems?\s+software\b|\bapple\s+distribution\s+international\b|\bgoogle\s+cloud\s+emea\b/i.test(text);
     if (tx.type !== 'expense') return tx;
