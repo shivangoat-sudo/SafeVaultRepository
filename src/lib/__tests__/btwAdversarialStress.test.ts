@@ -4,20 +4,8 @@ import { calculateFiscalVatReport, tweeKolommenWeergave } from '../btwFiscalSafe
 import { parseCsvToRawTransactions } from '../../utils/vatCsvParser';
 import type { RawTransaction } from '../btwSafeTypes';
 
-const expense = (id: string, description: string, amount_incl = 121, memo = ''): RawTransaction => ({
-  id,
-  type: 'expense',
-  amount_incl,
-  description,
-  memo,
-});
-const income = (id: string, description: string, amount_incl: number, memo = ''): RawTransaction => ({
-  id,
-  type: 'income',
-  amount_incl,
-  description,
-  memo,
-});
+const expense = (id: string, description: string, amount_incl = 121, memo = ''): RawTransaction => ({ id, type: 'expense', amount_incl, description, memo });
+const income = (id: string, description: string, amount_incl: number, memo = ''): RawTransaction => ({ id, type: 'income', amount_incl, description, memo });
 
 const adversarialRows: RawTransaction[] = [
   income('a01', 'Verkoop zakelijke dienstverlening', 121),
@@ -54,7 +42,6 @@ const adversarialRows: RawTransaction[] = [
 
 const report = calculateFiscalVatReport(adversarialRows);
 const view = tweeKolommenWeergave(report);
-
 assert.equal(report.transactions.length, adversarialRows.length, 'Elke banktransactie moet zichtbaar blijven in het rapport.');
 assert.ok(report.audit.unresolved >= 7, 'De bewust ambigue combinaties moeten fail-closed blijven.');
 assert.equal(view.twijfelgevallen.length, report.audit.unresolved, 'Twijfelgevallenweergave moet aansluiten op unresolved.');
@@ -105,12 +92,14 @@ assert.equal(report.aangifte['1a'].btw, 0, '1a mag geen onbekende verkoop-btw be
 assert.equal(report.aangifte['1b'].btw, 9, '1b onverwacht gewijzigd.');
 assert.equal(report.aangifte['3a'].btw, 0, '3a moet 0 btw tonen.');
 
+// Customer/import summary rows are valid bank rows syntactically but must never be trusted as fiscal facts.
+// Use a separate debit/credit dialect so this test also verifies summary exclusion independently of Af/Bij parsing.
 const csvWithSummary = [
-  'Datum;Naam / Omschrijving;Tegenrekening;Af Bij;Bedrag;Mededelingen',
-  '2026-01-01;Verkoop boek 9%;NL00TEST;Bij;109,00;factuur 9%',
-  '2026-01-02;TOTAAL BTW 21%;;Af;999999,99;door klant berekend',
-  '2026-01-03;Totaal incl. BTW;NL00TEST;Af;888888,88;samenvatting',
-  '2026-01-04;OpenAI LLC;US00TEST;Af;121,00;software',
+  'Datum;Naam / Omschrijving;Tegenrekening;Debet;Credit;Mededelingen',
+  '2026-01-01;Verkoop boek 9%;NL00TEST;;109,00;factuur 9%',
+  '2026-01-02;TOTAAL BTW 21%;;999999,99;;door klant berekend',
+  '2026-01-03;Totaal incl. BTW;NL00TEST;888888,88;;samenvatting',
+  '2026-01-04;OpenAI LLC;US00TEST;121,00;;software',
 ].join('\n');
 const parsedSummary = parseCsvToRawTransactions(csvWithSummary);
 assert.equal(parsedSummary.length, 4, 'Alle fysieke bankregels moeten worden geparsed.');
