@@ -76,10 +76,10 @@ assert.equal(knownSupplierProcessor.transactions[0].section, '4a');
 
 const ambiguousRows = [
   expense('cafeOnly', 'Café De Hoek', 423.50),
-  expense('cafeAlcohol', 'Café De Hoek bier', 12.10),
   expense('supermarketOnly', 'Albert Heijn Zakelijk', 32.15),
   expense('hotelMixed', 'Hotel De Zon all-in ontbijt', 150),
-  expense('medicalCosmetic', 'Kliniek Tandheelkunde cosmetisch bleken', 500),
+  expense('supermarketMixed', 'Jumbo Zakelijk boodschappen', 80),
+  expense('restaurantGeneric', 'Restaurant De Molen', 145),
 ];
 const ambiguousReport = calculateFiscalVatReport(ambiguousRows);
 const ambiguousView = tweeKolommenWeergave(ambiguousReport);
