@@ -31,19 +31,47 @@ function toCoreReport(report: FiscalReport): CoreFiscalReport {
   };
 }
 
+function addEvidenceState(report: FiscalReport): FiscalReport {
+  const transactions = report.transactions.map((tx) => {
+    // A bank transaction is enough to START calculation/classification. For a
+    // normal input-VAT claim, however, documentary support is still required.
+    // Keep that as a separate status so it cannot turn into a manual
+    // classification request or block the calculation itself.
+    const needsDocument =
+      tx.type === 'expense' &&
+      tx.deductible &&
+      (tx.classification === 'domestic_input_21' ||
+        tx.classification === 'domestic_input_9' ||
+        tx.classification === 'domestic_reverse_charge' ||
+        tx.classification === 'eu_reverse_charge' ||
+        tx.classification === 'non_eu_reverse_charge');
+
+    return needsDocument
+      ? { ...tx, evidenceRequired: true, evidenceStatus: tx.evidenceStatus === 'human_confirmed' ? 'human_confirmed' : 'required' as const }
+      : tx;
+  });
+
+  const evidenceRequired = transactions.filter((tx) => tx.evidenceRequired).length;
+  return {
+    ...report,
+    transactions,
+    audit: { ...report.audit, evidenceRequired },
+  };
+}
+
 export function calculateFiscalVatReport(
   rows: import('./btwSafeTypes').RawTransaction[],
   overrides: Record<string, BoekhouderBeoordeling> = {},
   adjustments: FiscalAdjustments = {},
 ): FiscalReport {
   const report = calculateProductionVatReport(rows, overrides, adjustments);
-  return {
+  return addEvidenceState({
     ...report,
     overzicht: {
       ...report.overzicht,
       status: report.overzicht.status === 'af_te_drager' ? 'af_te_dragen' : 'terug_te_vorderen',
     },
-  };
+  });
 }
 
 /**
@@ -54,9 +82,9 @@ export function calculateFiscalVatReport(
  */
 export function tweeKolommenWeergave(report: FiscalReport) {
   return {
-    zeker: report.transactions.filter(t => t.includedInTotals && t.confidence === 'high'),
+    zeker: report.transactions.filter((t) => t.includedInTotals && t.confidence === 'high'),
     twijfelgevallen: report.transactions.filter(
-      t => t.classification === 'unresolved' || (!t.includedInTotals && t.confidence === 'low'),
+      (t) => t.classification === 'unresolved' || (!t.includedInTotals && t.confidence === 'low'),
     ),
   };
 }
