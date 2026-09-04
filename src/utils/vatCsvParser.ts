@@ -14,20 +14,20 @@ export function parseCsvToRawTransactions(csvContent: string): RawTransaction[] 
   if (rows.length <= 1) return [];
   const headers = rows[0].map(h => String(h ?? '').replace(/^\uFEFF/, '').trim().toLowerCase());
   const findIdx = (keywords: string[]) => keywords.map(k => headers.findIndex(h => h === k || h.includes(k))).find(i => i !== -1) ?? -1;
+  const findExactIdx = (names: string[]) => names.map(n => headers.findIndex(h => h === n)).find(i => i !== -1) ?? -1;
   const datumIdx=findIdx(['datum','date','transaction date','boekdatum']);
   const descriptionIdx=findIdx(['naam / omschrijving','omschrijving','description','counterparty','naam','tegenpartij','details','mededeling']);
   const counterpartyIdx=findIdx(['tegenrekening','iban','counterparty iban','rekeningnummer']);
   const directionIdx=findIdx(['af bij','af/bij','direction','type','credit debit','debit credit']);
   const amountIdx=findIdx(['bedrag','amount','transaction amount','waarde']);
-  const debitIdx=findIdx(['debit','debitering','af','afgeschreven']);
-  const creditIdx=findIdx(['credit','creditering','bij','bijgeschreven']);
+  const debitIdx=findExactIdx(['debit','debitering','afgeschreven','withdrawal','uitgaand']);
+  const creditIdx=findExactIdx(['credit','creditering','bijgeschreven','deposit','inkomend']);
   const memoIdx=findIdx(['mededelingen','memo','opmerking','notes','message']);
   const submittedExclIdx=findIdx(['bedrag excl btw','bedrag exclusief btw','amount excl vat','netto bedrag','grondslag']);
   const submittedVatIdx=findIdx(['btw bedrag','btw-bedrag','vat amount','omzetbelasting']);
   const submittedRateIdx=findIdx(['btw percentage','btw-percentage','btw tarief','btw-tarief','vat rate','vat percentage']);
   const submittedSectionIdx=findIdx(['btw rubriek','btw-rubriek','aangifterubriek','aangifte rubriek','rubriek']);
   if(amountIdx===-1 && debitIdx===-1 && creditIdx===-1) throw new Error('CSV bevat geen herkenbare bedragkolom.');
-  if(directionIdx===-1 && debitIdx===-1 && creditIdx===-1 && amountIdx===-1) throw new Error('CSV bevat geen herkenbare transactierichting of bedragkolommen.');
   const output: RawTransaction[]=[]; const seen=new Map<string,number>();
   for(let i=1;i<rows.length;i++){
     const row=rows[i]; if(!row?.length) continue;
