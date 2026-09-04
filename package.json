@@ -9,7 +9,7 @@
     "start": "node dist/server.cjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
-    "test:btw-safety": "tsx src/lib/__tests__/btwDebugProduction.test.ts && tsx scripts/btwSafetySmoke.ts && tsx scripts/btwFiscalV3Reference.ts && tsx scripts/btwCsvSafetyReference.ts && tsx scripts/btwParserReference.ts && tsx scripts/btwFiscalEdgeCases.ts && tsx src/lib/__tests__/btwSubmissionValidator.test.ts && tsx src/lib/__tests__/btwProductionSubmissionAudit.test.ts && tsx src/lib/__tests__/btwProductionContext.test.ts && tsx src/lib/__tests__/btwProductionNoManualReview.test.ts && tsx src/lib/__tests__/btwBankFileCoverage.test.ts && tsx src/lib/__tests__/btwFiscalConformance.test.ts && tsx src/lib/__tests__/btwRuleRegistry.test.ts && tsx src/lib/__tests__/btwAdversarialStress.test.ts && tsx src/lib/__tests__/btwDeepRegression.test.ts",
+    "test:btw-safety": "tsx scripts/btwSafetySmoke.ts && tsx scripts/btwFiscalV3Reference.ts && tsx scripts/btwCsvSafetyReference.ts && tsx scripts/btwParserReference.ts && tsx scripts/btwFiscalEdgeCases.ts && tsx src/lib/__tests__/btwSubmissionValidator.test.ts && tsx src/lib/__tests__/btwProductionSubmissionAudit.test.ts && tsx src/lib/__tests__/btwProductionContext.test.ts && tsx src/lib/__tests__/btwProductionNoManualReview.test.ts && tsx src/lib/__tests__/btwBankFileCoverage.test.ts && tsx src/lib/__tests__/btwFiscalConformance.test.ts && tsx src/lib/__tests__/btwRuleRegistry.test.ts && tsx src/lib/__tests__/btwAdversarialStress.test.ts && tsx src/lib/__tests__/btwDeepRegression.test.ts",
     "test": "tsx src/lib/__tests__/vatEngine.test.ts && tsx src/lib/__tests__/calculateVatReport.test.ts && tsx src/lib/__tests__/btwMerchantClassification.test.ts && tsx src/lib/__tests__/btwProductionContext.test.ts"
   },
   "dependencies": {
@@ -19,7 +19,7 @@
     "@types/pg": "^8.21.0",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.5",
-    "bcryptjs": "^3.0.0",
+    "bcryptjs": "^3.0.3",
     "dotenv": "^17.4.2",
     "esbuild": "^0.28.2",
     "express": "^5.2.1",
