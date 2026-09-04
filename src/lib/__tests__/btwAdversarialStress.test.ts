@@ -92,14 +92,15 @@ assert.equal(report.aangifte['1a'].btw, 0, '1a mag geen onbekende verkoop-btw be
 assert.equal(report.aangifte['1b'].btw, 9, '1b onverwacht gewijzigd.');
 assert.equal(report.aangifte['3a'].btw, 0, '3a moet 0 btw tonen.');
 
-// Customer/import summary rows are valid bank rows syntactically but must never be trusted as fiscal facts.
-// Use a separate debit/credit dialect so this test also verifies summary exclusion independently of Af/Bij parsing.
+// Valid bank rows that contain customer-calculated summary figures. The rows
+// are syntactically ordinary transactions, but their description marks them as
+// summaries and their absurd amounts must never enter fiscal totals.
 const csvWithSummary = [
-  'Datum;Naam / Omschrijving;Tegenrekening;Debet;Credit;Mededelingen',
-  '2026-01-01;Verkoop boek 9%;NL00TEST;;109,00;factuur 9%',
-  '2026-01-02;TOTAAL BTW 21%;;999999,99;;door klant berekend',
-  '2026-01-03;Totaal incl. BTW;NL00TEST;888888,88;;samenvatting',
-  '2026-01-04;OpenAI LLC;US00TEST;121,00;;software',
+  'Datum;Naam / Omschrijving;Tegenrekening;Af Bij;Bedrag;Mededelingen',
+  '2026-01-01;Verkoop boek 9%;NL00TEST;Bij;109,00;factuur 9%',
+  '2026-01-02;TOTAAL BTW 21%;NL00TEST;Af;999999,99;door klant berekend',
+  '2026-01-03;Totaal incl. BTW;NL00TEST;Af;888888,88;samenvatting',
+  '2026-01-04;OpenAI LLC;US00TEST;Af;121,00;software',
 ].join('\n');
 const parsedSummary = parseCsvToRawTransactions(csvWithSummary);
 assert.equal(parsedSummary.length, 4, 'Alle fysieke bankregels moeten worden geparsed.');
