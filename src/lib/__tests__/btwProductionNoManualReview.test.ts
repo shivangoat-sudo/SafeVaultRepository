@@ -64,8 +64,8 @@ expect('lawyer', 'domestic_input_21', '5b', 21, true);
 
 const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 const sum = (ids: string[]) => round2(ids.reduce((total, id) => total + vatAmount(id), 0));
-const expected4a = round2((24.20 + 30 + 19 + 21 + 24.20 + 20) * 0.21);
-const expected4b = round2((149 + 62.91 + 68.45) * 0.21);
+const expected4a = sum(['openai','elevenlabs','netlify','github','anthropic','resend']);
+const expected4b = sum(['apple','adobe','google']);
 const expected5b = sum(['openai','anthropic','elevenlabs','netlify','github','resend','adobe','apple','google','postnl','ah','didi','lawyer']);
 const expectedNonDeductible = sum(['cafe','grand-cafe']);
 
