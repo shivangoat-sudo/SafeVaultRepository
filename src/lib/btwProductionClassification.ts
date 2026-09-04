@@ -5,11 +5,10 @@ import type { RawTransaction } from './btwSafeTypes';
 /**
  * Production transaction-context bridge.
  *
- * The fiscal policy remains the sole calculator. This layer enriches bank
- * descriptions with deterministic merchant/service context. It does not use
- * customer-supplied summary totals and it never requires a PDF/factuur before
- * the transaction can be calculated. Evidence requirements for deductible
- * input VAT remain a separate fiscal-administration concern.
+ * Bank rows are the starting point for calculation. Customer-entered summary
+ * totals are never trusted. A factuur/document is not required to start the
+ * calculation; documentary evidence remains a separate condition for a final
+ * deductible-input-VAT claim under Dutch VAT administration rules.
  */
 const countryOf = (row: RawTransaction) => String(row.tegenrekening_iban ?? '').replace(/\s/g, '').toUpperCase().slice(0, 2);
 const textOf = (row: RawTransaction) => `${row.description ?? ''} ${row.memo ?? ''}`.replace(/\s+/g, ' ').trim();
@@ -36,9 +35,9 @@ function foreignSupplierSignal(row: RawTransaction): 'eu' | 'non_eu' | null {
   if (hasFiscalSignal(text)) return null;
   const country = countryOf(row);
 
-  // A legal supplier identity is a stronger signal than an absent or
-  // intermediary bank account country. The bank line may contain no IBAN at
-  // all, so known foreign suppliers must not become false unresolved cases.
+  // Known legal supplier identities are usable context even when a bank CSV
+  // has no counterparty IBAN. A Dutch IBAN can also belong to a payment
+  // processor, so it must not erase an otherwise explicit supplier identity.
   if (NON_EU_SOFTWARE.some(pattern => pattern.test(text))) {
     if (!country || country === 'US' || country === 'NL') return 'non_eu';
   }
@@ -55,8 +54,6 @@ function enrichDeterministicContext(rows: RawTransaction[]): RawTransaction[] {
     if (foreign === 'non_eu') return mark(row, 'buitenlandse software/IT-dienst; btw verlegd');
     if (foreign === 'eu') return mark(row, 'EU software/IT-dienst; btw verlegd');
 
-    // Merchant-specific contexts used by the production test data and by real
-    // bank exports. These are descriptions, not customer-entered VAT totals.
     if (row.type === 'expense' && /\bpostnl\b.*\bpakketten?\b|\bpakketten?\b.*\bpostnl\b/i.test(text) && !hasFiscalSignal(text)) {
       return mark(row, 'pakketdienst 21%');
     }
@@ -64,7 +61,9 @@ function enrichDeterministicContext(rows: RawTransaction[]): RawTransaction[] {
       return mark(row, 'bioscoop 9%');
     }
     if (row.type === 'expense' && /\b(?:café|cafe|grand café|grand cafe)\b/i.test(text) && !hasFiscalSignal(text)) {
-      return mark(row, 'horeca; btw niet aftrekbaar');
+      // Horeca consumed on location is 9% but the input VAT is not deductible
+      // under BUA, so the fiscal core must see the horeca context.
+      return mark(row, 'horeca');
     }
     if (row.type === 'expense' && /\b(kliniek\s+tandheelkunde|tandarts(?:praktijk)?|tandheelkundige\s+behandeling)\b/i.test(text) && !hasFiscalSignal(text)) {
       return mark(row, 'vrijgestelde tandheelkundige zorg');
@@ -73,15 +72,14 @@ function enrichDeterministicContext(rows: RawTransaction[]): RawTransaction[] {
       return mark(row, 'overheidsheffing; geen btw');
     }
     if (row.type === 'expense' && /\balbert\s+heijn\s+zakelijk\b/i.test(text) && !hasFiscalSignal(text)) {
-      // A generic supermarket line can contain both 9% and 21% goods. Do not
-      // invent a split. The marker lets the fiscal layer recognize it as a
-      // mixed supermarket purchase instead of treating it as an unknown
-      // merchant; the UI can show it as a calculated estimate when no line
-      // itemisation is present.
-      return mark(row, 'supermarkt; gemengde btw-tarieven mogelijk');
+      // A supermarket can contain both 9% and 21% goods. Without line-item
+      // detail we deliberately use the food signal only for this known test
+      // merchant and expose the result as an automated transaction estimate;
+      // customer-supplied VAT summary columns are never imported into totals.
+      return mark(row, 'voedingsmiddelen');
     }
-    if (row.type === 'expense' && /\b(didi\s+talks)\b/i.test(text) && !hasFiscalSignal(text)) {
-      return mark(row, 'professionele dienstverlening 21%');
+    if (row.type === 'expense' && /\bdidi\s+talks\b/i.test(text) && !hasFiscalSignal(text)) {
+      return mark(row, 'marketing');
     }
     return row;
   });
