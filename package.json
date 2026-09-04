@@ -23,7 +23,7 @@
     "dotenv": "^17.4.2",
     "esbuild": "^0.28.2",
     "express": "^5.2.1",
-    "jspdf": "^4.2.2",
+    "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
     "lucide-react": "^0.344.0",
     "multer": "^2.2.0",
