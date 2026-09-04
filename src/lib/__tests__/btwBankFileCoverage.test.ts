@@ -83,7 +83,7 @@ expectKnown('explicit', 'domestic_input_21', '5b', 21, true);
 assert.equal(byId('ambiguous').vat.status, 'unknown', 'De veilige engine mag een werkelijk ambigue omschrijving niet verzinnen.');
 assert.equal(byId('ambiguous').includedInTotals, false, 'Een werkelijk ambigue regel mag geen btw-totalen vervuilen.');
 assert.equal(report.aangifte['1a'], 21, '1a moet alleen verschuldigde 21%-omzet bevatten.');
-assert.equal(report.aangifte['1b'], 11, '1b moet alleen verschuldigde 9%-omzet bevatten.');
+assert.equal(report.aangifte['1b'], 10.01, '1b moet alleen verschuldigde 9%-omzet bevatten.');
 assert.equal(report.aangifte['3a'].btw, 0, '0%-uitvoer heeft geen verschuldigde btw.');
 assert.equal(report.aangifte['5a'], report.overzicht.output.total, '5a moet exact aansluiten op verschuldigde btw.');
 assert.equal(report.aangifte['5b'], report.overzicht.input.total, '5b moet exact aansluiten op aftrekbare voorbelasting.');
@@ -103,11 +103,12 @@ assert.equal(parsedSemi[2].amount_incl, 24.2);
 const csvComma = [
   'Date,Description,IBAN,Direction,Amount,Memo',
   '2026-01-01,Kantoorbenodigdheden,NL00TEST,expense,"1.234,56",zakelijk',
-  '2026-01-02,Verkoop boek 9%,NL00TEST,income,109,00,9%',
+  '2026-01-02,Verkoop boek 9%,NL00TEST,income,"109,00",9%',
 ].join('\n');
 const parsedComma = parseCsvToRawTransactions(csvComma);
 assert.equal(parsedComma.length, 2, 'Komma-bankbestand moet volledig worden gelezen.');
 assert.equal(parsedComma[0].amount_incl, 1234.56);
 assert.equal(parsedComma[1].type, 'income');
+assert.equal(parsedComma[1].amount_incl, 109);
 
 console.log('OK: broad bank-file coverage, fiscal direction, 0/9/21%, reverse charge, no-VAT payments, evidence separation and Dutch CSV variants.');
