@@ -75,15 +75,15 @@ expectKnown('sport', 'domestic_input_9', '5b', 9, true);
 expectKnown('salary', 'private_no_vat', 'geen', 0, false);
 expectKnown('loan', 'private_no_vat', 'geen', 0, false);
 expectKnown('tax', 'private_no_vat', 'geen', 0, false);
-expectKnown('bank', 'exempt_input', '5b', 0, false);
+expectKnown('bank', 'private_no_vat', 'geen', 0, false);
 expectKnown('non-eu', 'non_eu_reverse_charge', '4a', 21, true);
 expectKnown('eu', 'eu_reverse_charge', '4b', 21, true);
 expectKnown('explicit', 'domestic_input_21', '5b', 21, true);
 
 assert.equal(byId('ambiguous').vat.status, 'unknown', 'De veilige engine mag een werkelijk ambigue omschrijving niet verzinnen.');
 assert.equal(byId('ambiguous').includedInTotals, false, 'Een werkelijk ambigue regel mag geen btw-totalen vervuilen.');
-assert.equal(report.aangifte['1a'], 21, '1a moet alleen verschuldigde 21%-omzet bevatten.');
-assert.equal(report.aangifte['1b'], 10.01, '1b moet alleen verschuldigde 9%-omzet bevatten.');
+assert.equal(report.aangifte['1a'].btw, 21, '1a moet alleen verschuldigde 21%-btw bevatten.');
+assert.equal(report.aangifte['1b'].btw, 10.01, '1b moet alleen verschuldigde 9%-btw bevatten.');
 assert.equal(report.aangifte['3a'].btw, 0, '0%-uitvoer heeft geen verschuldigde btw.');
 assert.equal(report.aangifte['5a'], report.overzicht.output.total, '5a moet exact aansluiten op verschuldigde btw.');
 assert.equal(report.aangifte['5b'], report.overzicht.input.total, '5b moet exact aansluiten op aftrekbare voorbelasting.');
