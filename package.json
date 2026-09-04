@@ -9,7 +9,7 @@
     "start": "node dist/server.cjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
-    "test:btw-safety": "tsx scripts/btwSafetySmoke.ts && tsx scripts/btwFiscalV3Reference.ts && tsx scripts/btwCsvSafetyReference.ts && tsx scripts/btwParserReference.ts && tsx scripts/btwFiscalEdgeCases.ts && tsx src/lib/__tests__/btwSubmissionValidator.test.ts && tsx src/lib/__tests__/btwProductionSubmissionAudit.test.ts && tsx src/lib/__tests__/btwProductionContext.test.ts && tsx src/lib/__tests__/btwProductionNoManualReview.test.ts && tsx src/lib/__tests__/btwBankFileCoverage.test.ts && tsx src/lib/__tests__/btwFiscalConformance.test.ts && tsx src/lib/__tests__/btwRuleRegistry.test.ts && tsx src/lib/__tests__/btwAdversarialStress.test.ts",
+    "test:btw-safety": "tsx scripts/btwSafetySmoke.ts && tsx scripts/btwFiscalV3Reference.ts && tsx scripts/btwCsvSafetyReference.ts && tsx scripts/btwParserReference.ts && tsx scripts/btwFiscalEdgeCases.ts && tsx src/lib/__tests__/btwSubmissionValidator.test.ts && tsx src/lib/__tests__/btwProductionSubmissionAudit.test.ts && tsx src/lib/__tests__/btwProductionContext.test.ts && tsx src/lib/__tests__/btwProductionNoManualReview.test.ts && tsx src/lib/__tests__/btwBankFileCoverage.test.ts && tsx src/lib/__tests__/btwFiscalConformance.test.ts && tsx src/lib/__tests__/btwRuleRegistry.test.ts && tsx src/lib/__tests__/btwAdversarialStress.test.ts && tsx src/lib/__tests__/btwOnlineContext.test.ts",
     "test": "tsx src/lib/__tests__/vatEngine.test.ts && tsx src/lib/__tests__/calculateVatReport.test.ts && tsx src/lib/__tests__/btwMerchantClassification.test.ts && tsx src/lib/__tests__/btwProductionContext.test.ts"
   },
   "dependencies": {
@@ -23,8 +23,6 @@
     "dotenv": "^17.4.2",
     "esbuild": "^0.28.2",
     "express": "^5.2.1",
-    "jspdf": "^4.2.1",
-    "jspdf-autotable": "^5.0.8",
     "lucide-react": "^0.344.0",
     "multer": "^2.2.0",
     "nodemailer": "^9.0.5",
@@ -32,7 +30,6 @@
     "papaparse": "^5.5.4",
     "pdfjs-dist": "^6.3.289",
     "pg": "^8.23.0",
-    "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
