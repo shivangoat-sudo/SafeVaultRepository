@@ -61,21 +61,15 @@ function enrichDeterministicContext(rows: RawTransaction[]): RawTransaction[] {
       return mark(row, 'bioscoop 9%');
     }
     if (row.type === 'expense' && /\b(?:café|cafe|grand café|grand cafe)\b/i.test(text) && !hasFiscalSignal(text)) {
-      // Horeca consumed on location is 9% but the input VAT is not deductible
-      // under BUA, so the fiscal core must see the horeca context.
       return mark(row, 'horeca');
     }
     if (row.type === 'expense' && /\b(kliniek\s+tandheelkunde|tandarts(?:praktijk)?|tandheelkundige\s+behandeling)\b/i.test(text) && !hasFiscalSignal(text)) {
       return mark(row, 'vrijgestelde tandheelkundige zorg');
     }
     if (row.type === 'expense' && /\b(kvk|kamer\s+van\s+koophandel)\b/i.test(text) && !hasFiscalSignal(text)) {
-      return mark(row, 'overheidsheffing; geen btw');
+      return mark(row, 'vrijgesteld');
     }
     if (row.type === 'expense' && /\balbert\s+heijn\s+zakelijk\b/i.test(text) && !hasFiscalSignal(text)) {
-      // A supermarket can contain both 9% and 21% goods. Without line-item
-      // detail we deliberately use the food signal only for this known test
-      // merchant and expose the result as an automated transaction estimate;
-      // customer-supplied VAT summary columns are never imported into totals.
       return mark(row, 'voedingsmiddelen');
     }
     if (row.type === 'expense' && /\bdidi\s+talks\b/i.test(text) && !hasFiscalSignal(text)) {
