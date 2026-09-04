@@ -88,7 +88,7 @@ expectKnown('a12', 'private_no_vat', 'geen', 0);
 expectKnown('a17', 'domestic_input_21', '5b', 21);
 expectKnown('a18', 'domestic_input_9', '5b', 9);
 expectKnown('a20', 'horeca_bua_9', '5b', 9);
-expectKnown('a22', 'domestic_input_9', '5b', 9);
+expectKnown('a22', 'horeca_bua_9', '5b', 9);
 expectKnown('a23', 'domestic_input_21', '5b', 21);
 expectKnown('a24', 'domestic_input_9', '5b', 9);
 expectKnown('a26', 'domestic_input_9', '5b', 9);
@@ -107,10 +107,7 @@ for (const id of ['a13', 'a14', 'a15', 'a16', 'a19', 'a21']) {
   assert.equal(tx.includedInTotals, false, `${id}: ambigue transactie mag totalen niet vervuilen`);
 }
 
-// A café description containing both an alcohol signal (normally 21%) and a
-// food signal (normally 9%) is deliberately contradictory bank data. The safe
-// production boundary must not choose one rate merely because one signal wins
-// a regex race; it must fail closed.
+// Café lines with insufficient/contradictory detail must fail closed.
 assert.equal(byId('a19').vat.status, 'unknown');
 assert.equal(byId('a19').includedInTotals, false);
 assert.equal(byId('a21').vat.status, 'unknown');
