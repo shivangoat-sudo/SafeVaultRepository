@@ -4,24 +4,9 @@ import { calculateFiscalVatReport, tweeKolommenWeergave } from '../btwFiscalSafe
 import { parseCsvToRawTransactions } from '../../utils/vatCsvParser';
 import type { RawTransaction } from '../btwSafeTypes';
 
-const expense = (id: string, description: string, amount_incl = 121, memo = ''): RawTransaction => ({
-  id,
-  type: 'expense',
-  amount_incl,
-  description,
-  memo,
-});
+const expense = (id: string, description: string, amount_incl = 121, memo = ''): RawTransaction => ({ id, type: 'expense', amount_incl, description, memo });
+const income = (id: string, description: string, amount_incl: number, memo = ''): RawTransaction => ({ id, type: 'income', amount_incl, description, memo });
 
-const income = (id: string, description: string, amount_incl: number, memo = ''): RawTransaction => ({
-  id,
-  type: 'income',
-  amount_incl,
-  description,
-  memo,
-});
-
-// Adversarial bank rows: descriptions intentionally contain misleading words,
-// mixed signals, summary-looking text, punctuation/diacritics, and explicit rates.
 const adversarialRows: RawTransaction[] = [
   income('a01', 'Verkoop zakelijke dienstverlening', 121),
   income('a02', 'Verkoop boek', 109),
@@ -95,36 +80,25 @@ expectKnown('a28', 'domestic_input_9', '5b', 9);
 expectKnown('a29', 'domestic_input_21', '5b', 21);
 expectKnown('a30', 'domestic_input_21', '5b', 21);
 
-const ambiguousSale = byId('a01');
-assert.equal(ambiguousSale.vat.status, 'unknown', 'Een kale verkoopomschrijving mag niet automatisch een tarief krijgen.');
-assert.equal(ambiguousSale.includedInTotals, false, 'Een onbepaalbare verkoopregel mag de BTW-totalen niet vervuilen.');
-
-for (const id of ['a13', 'a14', 'a15', 'a16', 'a19', 'a21']) {
+for (const id of ['a01', 'a13', 'a14', 'a15', 'a16', 'a19', 'a21']) {
   const tx = byId(id);
   assert.equal(tx.vat.status, 'unknown', `${id}: ambigue bankdata mag niet gokken`);
   assert.equal(tx.includedInTotals, false, `${id}: ambigue transactie mag totalen niet vervuilen`);
 }
 
-assert.equal(byId('a19').vat.status, 'unknown');
-assert.equal(byId('a19').includedInTotals, false);
-assert.equal(byId('a21').vat.status, 'unknown');
-assert.equal(byId('a21').includedInTotals, false);
-
 assert.equal(report.aangifte['5a'], report.overzicht.output.total, '5a moet gelijk zijn aan verschuldigde btw.');
 assert.equal(report.aangifte['5b'], report.overzicht.input.total, '5b moet gelijk zijn aan aftrekbare voorbelasting.');
-assert.equal(
-  Number(report.aangifte['5a']) - Number(report.aangifte['5b']),
-  report.overzicht.netto,
-  'Netto btw moet exact aansluiten op 5a - 5b.',
-);
+assert.equal(Number(report.aangifte['5a']) - Number(report.aangifte['5b']), report.overzicht.netto, 'Netto btw moet exact aansluiten op 5a - 5b.');
 assert.equal(report.aangifte['1a'].btw, 0, '1a mag geen onbekende verkoop-btw bevatten.');
 assert.equal(report.aangifte['1b'].btw, 9, '1b onverwacht gewijzigd.');
 assert.equal(report.aangifte['3a'].btw, 0, '3a moet 0 btw tonen.');
 
+// Customer/import summary rows: they are valid bank rows syntactically but must
+// never be trusted as fiscal facts.
 const csvWithSummary = [
   'Datum;Naam / Omschrijving;Tegenrekening;Af Bij;Bedrag;Mededelingen',
   '2026-01-01;Verkoop boek 9%;NL00TEST;Bij;109,00;factuur 9%',
-  '2026-01-02;TOTAAL BTW 21%;; ;999999,99;door klant berekend',
+  '2026-01-02;TOTAAL BTW 21%;;Af;999999,99;door klant berekend',
   '2026-01-03;Totaal incl. BTW;NL00TEST;Af;888888,88;samenvatting',
   '2026-01-04;OpenAI LLC;US00TEST;Af;121,00;software',
 ].join('\n');
