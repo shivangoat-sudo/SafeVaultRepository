@@ -51,8 +51,8 @@ function enrichDeterministicContext(rows: RawTransaction[]): RawTransaction[] {
   return rows.map(row => {
     const text = textOf(row);
     const foreign = foreignSupplierSignal(row);
-    if (foreign === 'non_eu') return mark(row, 'buitenlandse software/IT-dienst; btw verlegd');
-    if (foreign === 'eu') return mark(row, 'EU software/IT-dienst; btw verlegd');
+    if (foreign === 'non_eu') return mark(row, 'niet-EU verlegging 4a 21%');
+    if (foreign === 'eu') return mark(row, 'EU-verlegging 4b 21%');
 
     if (row.type === 'expense' && /\bpostnl\b.*\bpakketten?\b|\bpakketten?\b.*\bpostnl\b/i.test(text) && !hasFiscalSignal(text)) {
       return mark(row, 'pakketdienst 21%');
@@ -61,19 +61,22 @@ function enrichDeterministicContext(rows: RawTransaction[]): RawTransaction[] {
       return mark(row, 'bioscoop 9%');
     }
     if (row.type === 'expense' && /\b(?:café|cafe|grand café|grand cafe)\b/i.test(text) && !hasFiscalSignal(text)) {
-      return mark(row, 'horeca');
+      return mark(row, 'horeca niet-aftrekbaar 9%');
     }
     if (row.type === 'expense' && /\b(kliniek\s+tandheelkunde|tandarts(?:praktijk)?|tandheelkundige\s+behandeling)\b/i.test(text) && !hasFiscalSignal(text)) {
       return mark(row, 'vrijgestelde tandheelkundige zorg');
     }
     if (row.type === 'expense' && /\b(kvk|kamer\s+van\s+koophandel)\b/i.test(text) && !hasFiscalSignal(text)) {
-      return mark(row, 'vrijgesteld');
+      return mark(row, 'KVK inschrijfvergoeding vrijgesteld');
     }
     if (row.type === 'expense' && /\balbert\s+heijn\s+zakelijk\b/i.test(text) && !hasFiscalSignal(text)) {
-      return mark(row, 'voedingsmiddelen');
+      return mark(row, 'voedingsmiddelen 9%');
     }
     if (row.type === 'expense' && /\bdidi\s+talks\b/i.test(text) && !hasFiscalSignal(text)) {
-      return mark(row, 'marketing');
+      return mark(row, 'marketingdienst 21%');
+    }
+    if (row.type === 'expense' && /\badvocatenkantoor\b|\badvocaat\b/i.test(text) && !hasFiscalSignal(text)) {
+      return mark(row, 'advocaat 21%');
     }
     return row;
   });
