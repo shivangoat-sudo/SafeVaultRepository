@@ -30,22 +30,23 @@ function enrichDeterministicContext(rows: RawTransaction[]): RawTransaction[] {
     const foreign = foreignSupplierSignal(row);
     if (foreign === 'non_eu') return mark(row, 'niet-EU verlegging 4a 21%');
     if (foreign === 'eu') return mark(row, 'EU-verlegging 4b 21%');
-    if (row.type === 'expense' && /\bpostnl\b.*\bpakketten?\b|\bpakketten?\b.*\bpostnl\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'pakketdienst 21%');
-    if (row.type === 'expense' && /\bpath[eé]\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'bioscoop 9%');
-    if (row.type === 'expense' && /\b(?:café|cafe|grand café|grand cafe)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'horeca niet-aftrekbaar 9%');
-    if (row.type === 'expense' && /\b(kliniek\s+tandheelkunde|tandarts(?:praktijk)?|tandheelkundige\s+behandeling)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'tandheelkundige behandeling vrijgesteld');
-    if (row.type === 'expense' && /\b(kvk|kamer\s+van\s+koophandel)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'KVK inschrijfvergoeding zonder btw');
-    if (row.type === 'expense' && /\balbert\s+heijn\s+zakelijk\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'voedingsmiddelen 9%');
-    if (row.type === 'expense' && /\bdidi\s+talks\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'marketingdienst 21%');
-    if (row.type === 'expense' && /\badvocatenkantoor\b|\badvocaat\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'advocaat 21%');
-    if (row.type === 'expense' && /\b(?:loon|salaris|salarisbetaling|payroll|nettoloon|loonheffing|dividend)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'geen btw op loon/dividend');
-    if (row.type === 'expense' && /\b(?:lening|aflossing|rente|rentevergoeding|krediet)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'financiering zonder normale voorbelasting');
-    if (row.type === 'expense' && /\b(?:belastingdienst|inkomstenbelasting|vennootschapsbelasting|loonheffing|btw-aangifte|belastingaanslag)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'belastingbetaling zonder btw');
-    if (row.type === 'expense' && /\b(?:bankkosten|rekeningkosten|bank fee|payment fee|transactiekosten|betalingskosten)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'bankkosten financiële dienstverlening');
-    if (row.type === 'expense' && /\b(?:supermarkt|voedingsmiddelen|boodschappen|levensmiddelen|drinkwater|waterrekening|bloemen|bloemboeket|planten|geneesmiddelen|medicijnen|boek|boeken|dagblad|tijdschrift|periodiek)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, '9% goederen');
-    if (row.type === 'expense' && /\b(?:kapper|kapsalon|fietsenmaker|fietsreparatie|schoenenreparatie|schoenmaker|kledingreparatie|personenvervoer|taxi|openbaar vervoer|ov-chipkaart|treinreis|busreis|tramreis|metroreis|museum|theater|concert|bioscoop|sportclub|zwembad|sauna)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, '9% dienst');
-    if (row.type === 'expense' && /\b(?:hotel|overnachting|pension|vakantiehuis|camping)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'logies 21% vanaf 2026');
-    if (row.type === 'expense' && /\b(?:kantoorbenodigdheden|bureau|bureaustoel|printer|monitor|laptop|computer|hardware|elektronica|gereedschap|meubilair|meubel|drukwerk|verpakking|brandstof|benzine|diesel|website|hosting|software|licentie|consultancy|advies|accountant|boekhouding|notaris|verzekering|telecom|internet|telefoon)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'algemene 21% prestatie');
+    if (row.type !== 'expense') return row;
+    if (/\bpostnl\b.*\bpakketten?\b|\bpakketten?\b.*\bpostnl\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'pakketdienst 21%');
+    if (/\bpath[eé]\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'bioscoop 9%');
+    if (/\b(?:café|cafe|grand café|grand cafe)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'horeca niet-aftrekbaar 9%');
+    if (/\b(kliniek\s+tandheelkunde|tandarts(?:praktijk)?|tandheelkundige\s+behandeling)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'tandheelkundige behandeling vrijgesteld');
+    if (/\b(kvk|kamer\s+van\s+koophandel)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'KVK inschrijfvergoeding zonder btw');
+    if (/\balbert\s+heijn\s+zakelijk\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'voedingsmiddelen 9%');
+    if (/\bdidi\s+talks\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'marketingdienst 21%');
+    if (/\badvocatenkantoor\b|\badvocaat\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'advocaat 21%');
+    if (/\b(?:loon|salaris|salarisbetaling|payroll|nettoloon|loonheffing|dividend)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'geen btw op loon/dividend');
+    if (/\b(?:lening|aflossing|rente|rentevergoeding|krediet)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'financiering zonder normale voorbelasting');
+    if (/\b(?:belastingdienst|inkomstenbelasting|vennootschapsbelasting|loonheffing|btw-aangifte|belastingaanslag)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'belastingbetaling zonder btw');
+    if (/\b(?:bankkosten|rekeningkosten|bank fee|payment fee|transactiekosten|betalingskosten)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'bankkosten financiële dienstverlening');
+    if (/\b(?:supermarkt|voedingsmiddelen|boodschappen|levensmiddelen|drinkwater|waterrekening|bloemen|bloemboeket|planten|geneesmiddelen|medicijnen|boek|boeken|dagblad|tijdschrift|periodiek)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, '9% goederen');
+    if (/\b(?:kapper|kapsalon|fietsenmaker|fietsreparatie|schoenenreparatie|schoenmaker|kledingreparatie|personenvervoer|taxi|openbaar vervoer|ov-chipkaart|treinreis|busreis|tramreis|metroreis|museum|theater|concert|bioscoop|sportclub|zwembad|sauna)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, '9% dienst');
+    if (/\b(?:hotel|overnachting|pension|vakantiehuis|camping)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'logies 21% vanaf 2026');
+    if (/\b(?:kantoorbenodigdheden|bureau|bureaustoel|printer|monitor|laptop|computer|hardware|elektronica|gereedschap|meubilair|meubel|drukwerk|verpakking|brandstof|benzine|diesel|website|hosting|software|licentie|consultancy|advies|accountant|boekhouding|notaris|verzekering|telecom|internet|telefoon)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'algemene 21% prestatie');
     return row;
   });
 }
@@ -53,6 +54,8 @@ function enrichDeterministicContext(rows: RawTransaction[]): RawTransaction[] {
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const grossVat = (incl: number, rate: 9 | 21) => round2(incl * rate / (100 + rate));
 const netFromGross = (incl: number, rate: 9 | 21) => round2(incl - grossVat(incl, rate));
+const inputClass = (rate: 9 | 21): FiscalClassification => rate === 9 ? 'domestic_input_9' : 'domestic_input_21';
+const outputClass = (rate: 9 | 21): FiscalClassification => rate === 9 ? 'domestic_output_9' : 'domestic_output_21';
 
 function patchKnownContexts(report: FiscalReport, sourceRows: RawTransaction[]): FiscalReport {
   const sourceById = new Map(sourceRows.map(row => [row.id, row]));
@@ -71,6 +74,7 @@ function patchKnownContexts(report: FiscalReport, sourceRows: RawTransaction[]):
     const text = `${source ? textOf(source) : ''} ${tx.description ?? ''} ${tx.omschrijving ?? ''}`.toLowerCase();
     const isNonEuSupplier = /\bopenai(?:\s+llc)?\b|\belevenlabs(?:\s+inc)?\b|\banthropic(?:\s+pbc)?\b|\bnetlify(?:\s+inc)?\b|\bgit(?:hub|hub\s+inc)?\b|\bresend(?:\s+inc)?\b/i.test(text);
     const isEuSupplier = /\badobe\s+systems?\s+software\b|\bapple\s+distribution\s+international\b|\bgoogle\s+cloud\s+emea\b/i.test(text);
+    const isExpenseContext = tx.type === 'expense';
     const isKnownContext = isNonEuSupplier || isEuSupplier || /postnl\s+pakketten?|pakketten?\s+postnl|path[eé]|(?:café|cafe|grand café|grand cafe)|kliniek\s+tandheelkunde|tandarts(?:praktijk)?|tandheelkundige\s+behandeling|kvk\s+inschrijfvergoeding|kamer\s+van\s+koophandel|albert\s+heijn\s+zakelijk|didi\s+talks|advocatenkantoor|\badvocaat\b|\b(?:loon|salaris|salarisbetaling|payroll|nettoloon|dividend)\b|\b(?:lening|aflossing|rente|rentevergoeding|krediet)\b|\b(?:belastingdienst|inkomstenbelasting|vennootschapsbelasting|loonheffing|btw-aangifte|belastingaanslag)\b|\b(?:bankkosten|rekeningkosten|bank fee|payment fee|transactiekosten|betalingskosten)\b|\b(?:supermarkt|voedingsmiddelen|boodschappen|levensmiddelen|drinkwater|waterrekening|bloemen|bloemboeket|planten|geneesmiddelen|medicijnen|boek|boeken|dagblad|tijdschrift|periodiek)\b|\b(?:kapper|kapsalon|fietsenmaker|fietsreparatie|schoenenreparatie|schoenmaker|kledingreparatie|personenvervoer|taxi|openbaar vervoer|ov-chipkaart|treinreis|busreis|tramreis|metroreis|museum|theater|concert|bioscoop|sportclub|zwembad|sauna)\b|\b(?:hotel|overnachting|pension|vakantiehuis|camping)\b|\b(?:kantoorbenodigdheden|bureau|bureaustoel|printer|monitor|laptop|computer|hardware|elektronica|gereedschap|meubilair|meubel|drukwerk|verpakking|brandstof|benzine|diesel|website|hosting|software|licentie|consultancy|advies|accountant|boekhouding|notaris|verzekering|telecom|internet|telefoon)\b/i.test(text);
     if (!isKnownContext) return tx;
 
@@ -80,6 +84,8 @@ function patchKnownContexts(report: FiscalReport, sourceRows: RawTransaction[]):
     let vat = 0;
     let explanation = tx.reason;
     let section: FiscalTransaction['section'] = 'geen';
+
+    if (!isExpenseContext && (isNonEuSupplier || isEuSupplier)) return tx;
 
     if (isNonEuSupplier) {
       desired = 'non_eu_reverse_charge'; rate = 21; excl = round2(tx.amount_incl_input); vat = round2(excl * 0.21); section = '4a';
@@ -96,39 +102,27 @@ function patchKnownContexts(report: FiscalReport, sourceRows: RawTransaction[]):
     } else if (/kvk\s+inschrijfvergoeding|kamer\s+van\s+koophandel/i.test(text)) {
       desired = 'exempt_input'; rate = 0; vat = 0; excl = round2(tx.amount_incl_input); section = '5b';
       explanation = 'KVK-inschrijfvergoeding: geen btw-bedrag wordt uit de banktransactie gefabriceerd.';
-    } else if (/loon|salaris|payroll|nettoloon|loonheffing|\bdividend\b/i.test(text)) {
+    } else if (/loon|salaris|payroll|nettoloon|loonheffing|\bdividend\b|lening|aflossing|rente|rentevergoeding|krediet|belastingdienst|inkomstenbelasting|vennootschapsbelasting|btw-aangifte|belastingaanslag/i.test(text)) {
       desired = 'private_no_vat'; rate = 0; vat = 0; excl = round2(tx.amount_incl_input); section = 'geen';
-      explanation = 'Loon-, salaris- of dividendbetaling: geen normale btw-voorbelasting op deze betaling.';
-    } else if (/lening|aflossing|rente|rentevergoeding|krediet/i.test(text)) {
-      desired = 'private_no_vat'; rate = 0; vat = 0; excl = round2(tx.amount_incl_input); section = 'geen';
-      explanation = 'Financieringsbetaling herkend; geen normale btw-voorbelasting op aflossing of rente.';
-    } else if (/belastingdienst|inkomstenbelasting|vennootschapsbelasting|loonheffing|btw-aangifte|belastingaanslag/i.test(text)) {
-      desired = 'private_no_vat'; rate = 0; vat = 0; excl = round2(tx.amount_incl_input); section = 'geen';
-      explanation = 'Belastingbetaling herkend; geen btw op een inkooptransactie.';
+      explanation = 'Betaling zonder normale btw-voorbelasting herkend; geen btw-bedrag uit de banktransactie gefabriceerd.';
     } else if (/bankkosten|rekeningkosten|bank fee|payment fee|transactiekosten|betalingskosten/i.test(text)) {
       desired = 'exempt_input'; rate = 0; vat = 0; excl = round2(tx.amount_incl_input); section = '5b';
       explanation = 'Financiële dienstverlening/bankkosten: geen btw-bedrag uit de banktransactie gefabriceerd.';
     } else if (/postnl\s+pakketten?|pakketten?\s+postnl/i.test(text)) {
-      desired = 'domestic_input_21'; rate = 21; vat = grossVat(tx.amount_incl_input, 21); excl = netFromGross(tx.amount_incl_input, 21); section = '5b';
+      rate = 21; vat = grossVat(tx.amount_incl_input, 21); excl = netFromGross(tx.amount_incl_input, 21); desired = inputClass(rate); section = '5b';
       explanation = 'Pakketdienst van PostNL; 21%-tarief toegepast.';
     } else if (/path[eé]|museum|theater|concert|bioscoop|sportclub|zwembad|sauna/i.test(text)) {
-      desired = 'domestic_input_9'; rate = 9; vat = grossVat(tx.amount_incl_input, 9); excl = netFromGross(tx.amount_incl_input, 9); section = '5b';
+      rate = 9; vat = grossVat(tx.amount_incl_input, 9); excl = netFromGross(tx.amount_incl_input, 9); desired = inputClass(rate); section = '5b';
       explanation = 'Culturele, recreatieve of sportieve toegang; 9%-tarief toegepast.';
-    } else if (/albert\s+heijn\s+zakelijk|supermarkt|voedingsmiddelen|boodschappen|levensmiddelen|drinkwater|waterrekening|bloemen|bloemboeket|planten|geneesmiddelen|medicijnen|boek|boeken|dagblad|tijdschrift|periodiek/i.test(text)) {
-      desired = 'domestic_input_9'; rate = 9; vat = grossVat(tx.amount_incl_input, 9); excl = netFromGross(tx.amount_incl_input, 9); section = '5b';
-      explanation = 'Herkenbare 9%-goederencategorie uit de Nederlandse btw-tabel; 9%-tarief toegepast.';
-    } else if (/kapper|kapsalon|fietsenmaker|fietsreparatie|schoenenreparatie|schoenmaker|kledingreparatie|personenvervoer|taxi|openbaar vervoer|ov-chipkaart|treinreis|busreis|tramreis|metroreis/i.test(text)) {
-      desired = 'domestic_input_9'; rate = 9; vat = grossVat(tx.amount_incl_input, 9); excl = netFromGross(tx.amount_incl_input, 9); section = '5b';
-      explanation = 'Herkenbare 9%-dienst uit de Nederlandse btw-tabel; 9%-tarief toegepast.';
+    } else if (/albert\s+heijn\s+zakelijk|supermarkt|voedingsmiddelen|boodschappen|levensmiddelen|drinkwater|waterrekening|bloemen|bloemboeket|planten|geneesmiddelen|medicijnen|boek|boeken|dagblad|tijdschrift|periodiek|kapper|kapsalon|fietsenmaker|fietsreparatie|schoenenreparatie|schoenmaker|kledingreparatie|personenvervoer|taxi|openbaar vervoer|ov-chipkaart|treinreis|busreis|tramreis|metroreis/i.test(text)) {
+      rate = 9; vat = grossVat(tx.amount_incl_input, 9); excl = netFromGross(tx.amount_incl_input, 9); desired = inputClass(rate); section = '5b';
+      explanation = 'Herkenbare Nederlandse 9%-categorie; 9%-tarief toegepast.';
     } else if (/hotel|overnachting|pension|vakantiehuis|camping/i.test(text)) {
-      desired = 'domestic_input_21'; rate = 21; vat = grossVat(tx.amount_incl_input, 21); excl = netFromGross(tx.amount_incl_input, 21); section = '5b';
+      rate = 21; vat = grossVat(tx.amount_incl_input, 21); excl = netFromGross(tx.amount_incl_input, 21); desired = inputClass(rate); section = '5b';
       explanation = 'Logiesprestatie in 2026; 21%-tarief toegepast.';
-    } else if (/kantoorbenodigdheden|bureau|bureaustoel|printer|monitor|laptop|computer|hardware|elektronica|gereedschap|meubilair|meubel|drukwerk|verpakking|brandstof|benzine|diesel|website|hosting|software|licentie|consultancy|advies|accountant|boekhouding|notaris|verzekering|telecom|internet|telefoon/i.test(text)) {
-      desired = 'domestic_input_21'; rate = 21; vat = grossVat(tx.amount_incl_input, 21); excl = netFromGross(tx.amount_incl_input, 21); section = '5b';
-      explanation = 'Herkenbare algemene zakelijke goederen/dienst; 21%-hoofdregel toegepast.';
-    } else if (/didi\s+talks|advocatenkantoor|\badvocaat\b/i.test(text)) {
-      desired = 'domestic_input_21'; rate = 21; vat = grossVat(tx.amount_incl_input, 21); excl = netFromGross(tx.amount_incl_input, 21); section = '5b';
-      explanation = 'Zakelijke professionele dienst; algemene 21%-tarief toegepast.';
+    } else if (/kantoorbenodigdheden|bureau|bureaustoel|printer|monitor|laptop|computer|hardware|elektronica|gereedschap|meubilair|meubel|drukwerk|verpakking|brandstof|benzine|diesel|website|hosting|software|licentie|consultancy|advies|accountant|boekhouding|notaris|verzekering|telecom|internet|telefoon|didi\s+talks|advocatenkantoor|\badvocaat\b/i.test(text)) {
+      rate = 21; vat = grossVat(tx.amount_incl_input, 21); excl = netFromGross(tx.amount_incl_input, 21); desired = inputClass(rate); section = '5b';
+      explanation = 'Herkenbare algemene zakelijke prestatie; 21%-hoofdregel toegepast.';
     }
 
     if (!desired || tx.classification === desired) return tx;
@@ -147,8 +141,6 @@ function patchKnownContexts(report: FiscalReport, sourceRows: RawTransaction[]):
       input.domestic9 = round2(input.domestic9 - oldVat); input.total = round2(input.total - oldVat); aangifte['5b'] = round2(aangifte['5b'] - oldVat);
     } else if (tx.classification === 'horeca_bua_9') {
       nonDeductible = round2(nonDeductible - oldVat);
-    } else if (tx.classification === 'exempt_input') {
-      // No VAT contribution is attached to an exempt input.
     }
 
     if (desired === 'non_eu_reverse_charge') {
