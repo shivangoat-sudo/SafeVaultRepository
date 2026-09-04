@@ -58,7 +58,7 @@ function hasContradictoryFiscalEvidence(row: RawTransaction): boolean {
   const text = normalizedText(row);
   if (!text) return false;
   const rates = new Set<number>();
-  for (const match of text.matchAll(/(?:^|[^0-9])(0|9|21)\s*%(?:[^0-9]|$)/gi)) rates.add(Number(match[1]));
+  for (const match of text.matchAll(/(?:^|\s)(0|9|21)\s*%(?=\s|$)/gi)) rates.add(Number(match[1]));
   const reverse = /\b(?:btw\s*verlegd|btw-verlegd|verlegde btw|reverse\s*charge)\b/i.test(text);
   const exemption = /\b(?:vrijgesteld|vrijstelling|btw-vrij)\b/i.test(text);
   return rates.size > 1 || (reverse && (rates.size > 0 || exemption)) || (exemption && rates.size > 0);
@@ -158,7 +158,7 @@ export function calculateFiscalVatReport(rows: RawTransaction[], overrides: Reco
     ...contradictory.map((row) => unresolvedTransaction(row, 'Tegenstrijdige fiscale signalen in de bankomschrijving; geen tarief of verleggingsbehandeling gegokt.')),
     ...ambiguous.map((row) => unresolvedTransaction(row, 'De bankomschrijving is niet specifiek genoeg om de fiscale behandeling veilig vast te stellen.')),
   ];
-  const transactions = [...base.transactions, ...appended];
+  const transactions = [...base.transactions.filter((tx) => !blockedIds.has(tx.id)), ...appended];
   const unresolved = transactions.filter((tx) => tx.classification === 'unresolved').length;
   const known = transactions.length - unresolved;
   const included = transactions.filter((tx) => tx.includedInTotals).length;
