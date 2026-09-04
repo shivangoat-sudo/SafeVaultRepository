@@ -5,8 +5,6 @@ import type { RawTransaction } from '../btwSafeTypes';
 const expense = (id: string, description: string, amount = 121, iban?: string): RawTransaction => ({ id, type: 'expense', amount_incl: amount, description, tegenrekening_iban: iban });
 const income = (id: string, description: string, amount = 121, iban?: string): RawTransaction => ({ id, type: 'income', amount_incl: amount, description, tegenrekening_iban: iban });
 
-// 1. Every ordinary rate/direction used by the production fiscal model has an
-// explicit reference case. These are intentionally bank-only inputs.
 const deterministicRows: RawTransaction[] = [
   income('out21', 'Verkoop zakelijke dienstverlening 21%'),
   income('out9', 'Verkoop boek 9%'),
@@ -34,7 +32,7 @@ const expected: Record<string, [string, string, number, boolean]> = {
   outExempt: ['exempt_output', '1e', 0, false],
   in21: ['domestic_input_21', '5b', 21, true],
   in9: ['domestic_input_9', '5b', 9, true],
-  zeroIn: ['zero_rated_input', '5b', 0, true],
+  zeroIn: ['zero_rated_input', '5b', 0, false],
   reverseNL: ['domestic_reverse_charge', '2a', 21, true],
   reverseEU: ['eu_reverse_charge', '4b', 21, true],
   reverseNonEU: ['non_eu_reverse_charge', '4a', 21, true],
@@ -54,8 +52,6 @@ for (const [id, [classification, section, rate, deductible]] of Object.entries(e
   assert.equal(tx.includedInTotals, true, `${id}: included`);
 }
 
-// 2. Special-return adjustments remain explicit and testable rather than being
-// inferred from arbitrary transaction names.
 const adjusted = calculateFiscalVatReport([], {}, {
   rubriek1c: { grondslag: 100, btw: 13 },
   rubriek1d: { grondslag: 50, btw: 10 },
@@ -63,7 +59,6 @@ const adjusted = calculateFiscalVatReport([], {}, {
 assert.deepEqual(adjusted.aangifte['1c'], { grondslag: 100, btw: 13 });
 assert.deepEqual(adjusted.aangifte['1d'], { grondslag: 50, btw: 10 });
 
-// 3. Summary rows never become VAT transactions.
 const withSummary = calculateFiscalVatReport([
   income('real', 'Verkoop dienst 21%', 121),
   expense('summary', 'Totaal btw € 21,00', 21),
@@ -74,7 +69,6 @@ assert.equal(withSummary.transactions.some(tx => tx.id === 'summary'), false);
 assert.equal(withSummary.transactions.some(tx => tx.id === 'ending'), false);
 assert.equal(withSummary.aangifte['1a'].btw, 21);
 
-// 4. Foreign payment-processor IBANs must not override known legal supplier identity.
 const knownSupplierProcessor = calculateFiscalVatReport([
   expense('openai-processor', 'OpenAI LLC', 24.20, 'NL00PROCESSOR'),
 ]);
@@ -82,7 +76,6 @@ assert.equal(byId('reverseNL').classification, 'domestic_reverse_charge');
 assert.equal(knownSupplierProcessor.transactions[0].classification, 'non_eu_reverse_charge');
 assert.equal(knownSupplierProcessor.transactions[0].section, '4a');
 
-// 5. Genuine bank-only ambiguity must fail closed instead of guessing a rate.
 const ambiguousRows = [
   expense('cafeOnly', 'Café De Hoek', 423.50),
   expense('cafeAlcohol', 'Café De Hoek bier', 12.10),
@@ -105,7 +98,6 @@ assert.equal(ambiguousView.twijfelgevallen.length, ambiguousRows.length);
 assert.equal(ambiguousReport.audit.unresolved, ambiguousRows.length);
 assert.equal(ambiguousReport.audit.problems.length, ambiguousRows.length);
 
-// A description that actually names the fiscal product can remain automatic.
 const explicitRows = calculateFiscalVatReport([
   expense('foodExplicit', 'Albert Heijn Zakelijk voedingsmiddelen 9%', 32.15),
   expense('hotelExplicit', 'Hotel De Zon logies 21%', 150),
@@ -116,7 +108,6 @@ assert.equal(explicitRows.transactions.find(t => t.id === 'foodExplicit')?.vat.s
 assert.equal(explicitRows.transactions.find(t => t.id === 'hotelExplicit')?.vat.status, 'known');
 assert.equal(explicitRows.transactions.find(t => t.id === 'horecaExplicit')?.classification, 'horeca_bua_9');
 
-// 6. Core reconciliation invariants: report totals and return boxes must agree.
 assert.equal(deterministic.aangifte['5a'], deterministic.overzicht.output.total);
 assert.equal(deterministic.aangifte['5b'], deterministic.overzicht.input.total);
 assert.equal(deterministic.audit.included, deterministic.transactions.filter(tx => tx.includedInTotals).length);
