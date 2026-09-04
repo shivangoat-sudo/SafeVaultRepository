@@ -162,10 +162,11 @@ export function calculateFiscalVatReport(rows: RawTransaction[], overrides: Reco
   const unresolved = transactions.filter((tx) => tx.classification === 'unresolved').length;
   const known = transactions.length - unresolved;
   const included = transactions.filter((tx) => tx.includedInTotals).length;
-  const problems = [
-    ...base.audit.problems,
-    ...((contradictory.length + ambiguous.length) > 0 ? ['Een of meer transacties vereisen boekhoudkundige beoordeling door onvoldoende of tegenstrijdige bankinformatie.'] : []),
-  ];
+  const unresolvedProblem = 'Een of meer transacties vereisen boekhoudkundige beoordeling door onvoldoende of tegenstrijdige bankinformatie.';
+  const filteredBaseProblems = base.audit.problems.filter((problem) => !(unresolved === 0 && /vereisen boekhoudkundige beoordeling voordat het rapport fiscaal compleet is/i.test(problem)));
+  const problems = unresolved > 0 || ambiguous.length + contradictory.length > 0
+    ? [...filteredBaseProblems, ...(filteredBaseProblems.includes(unresolvedProblem) ? [] : [unresolvedProblem])]
+    : filteredBaseProblems;
   const normalized: FiscalReport = {
     ...base,
     transactions,
