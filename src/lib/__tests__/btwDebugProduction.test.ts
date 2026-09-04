@@ -22,3 +22,12 @@ const rows: RawTransaction[] = [
 const report = calculateFiscalVatReport(rows);
 console.log('DEBUG_PRODUCTION', JSON.stringify(report.transactions.map((tx) => ({ id: tx.id, classification: tx.classification, section: tx.section, rate: tx.vat.status === 'known' ? tx.vat.rate : null, reason: tx.reason }))));
 console.log('DEBUG_AUDIT', JSON.stringify(report.audit));
+
+const conflictRows: RawTransaction[] = [
+  { id:'conflict-rates', type:'expense', amount_incl:121, description:'Kantoorbenodigdheden voeding 9% 21%' },
+  { id:'conflict-reverse-rate', type:'expense', amount_incl:121, description:'OpenAI LLC btw verlegd 21% 9%' },
+  { id:'conflict-exempt-taxable', type:'expense', amount_incl:121, description:'Tandarts behandeling vrijgesteld 21%' },
+];
+const conflictReport = calculateFiscalVatReport(conflictRows);
+console.log('DEBUG_CONFLICTS', JSON.stringify(conflictReport.transactions.map((tx) => ({ id: tx.id, description: tx.description, classification: tx.classification, section: tx.section, rate: tx.vat.status === 'known' ? tx.vat.rate : null, includedInTotals: tx.includedInTotals, reason: tx.reason }))));
+console.log('DEBUG_CONFLICT_AUDIT', JSON.stringify(conflictReport.audit));
