@@ -1,4 +1,4 @@
-import { calculateFiscalVatReport } from '../btwFiscalSafeNormalized';
+import { calculateFiscalVatReport, tweeKolommenWeergave } from '../btwFiscalSafeNormalized';
 import type { RawTransaction } from '../btwSafeTypes';
 
 const rows: RawTransaction[] = [
@@ -22,15 +22,14 @@ const rows: RawTransaction[] = [
 ];
 
 const report = calculateFiscalVatReport(rows);
+const view = tweeKolommenWeergave(report);
 
 if (report.audit.unresolved !== 0) throw new Error(`Geen enkele voorbeeldtransactie mag unresolved zijn; kreeg ${report.audit.unresolved}.`);
 if (report.audit.included !== rows.length) throw new Error(`Alle ${rows.length} transacties moeten automatisch in het berekeningsrapport staan.`);
+if (view.twijfelgevallen.length !== 0) throw new Error(`Geen enkele automatisch herkende voorbeeldtransactie mag als handmatige twijfelclassificatie worden getoond; kreeg ${view.twijfelgevallen.length}.`);
+if (report.audit.evidenceRequired === 0) throw new Error('De evidence-laag moet normale aftrekbare inkooptransacties apart markeren zonder ze als classificatietwijfel te tonen.');
 
-// Een ontbrekende factuur/document mag een latere bewijscontrole vereisen voor
-// een definitieve 5b-claim, maar mag de transactieanalyse en fiscale classificatie
-// niet blokkeren. Daarom is evidenceRequired geen fail-conditie van deze test.
-const evidenceOnlyProblems = report.audit.problems.filter(p => /boekhoudkundige beoordeling|factuur|bewijs|document|evidence/i.test(p));
-const nonEvidenceProblems = report.audit.problems.filter(p => !evidenceOnlyProblems.includes(p));
+const nonEvidenceProblems = report.audit.problems.filter(p => !/factuur|bewijs|document|evidence/i.test(p));
 if (nonEvidenceProblems.length !== 0) throw new Error(`Onverwachte fiscale auditproblemen: ${nonEvidenceProblems.join(' | ')}`);
 
 const byId = (id: string) => report.transactions.find(tx => tx.id === id)!;
@@ -60,4 +59,4 @@ expect('ah', 'domestic_input_9', '5b', 9, true);
 expect('didi', 'domestic_input_21', '5b', 21, true);
 expect('lawyer', 'domestic_input_21', '5b', 21, true);
 
-console.log('OK: production regression set is automatically classified with zero manual fiscal classifications and calculation is not blocked by missing invoices.');
+console.log('OK: production regression set is automatically classified with zero manual classifications; evidence requirements remain separate and calculation is not blocked by missing invoices.');
