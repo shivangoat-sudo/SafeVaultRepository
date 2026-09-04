@@ -41,7 +41,7 @@ const adversarialRows: RawTransaction[] = [
   expense('a16', 'Kliniek Tandheelkunde cosmetisch bleken'),
   expense('a17', 'Betaling leverancier 21%', 121),
   expense('a18', 'Betaling leverancier 9%', 109),
-  expense('a19', 'Café De Hoek 21%', 121),
+  expense('a19', 'Café De Hoek alcohol lunch', 121),
   expense('a20', 'Café De Hoek 9%', 109),
   expense('a21', 'Café De Hoek alcohol wijn', 121),
   expense('a22', 'Café De Hoek lunch', 109),
@@ -61,7 +61,7 @@ const view = tweeKolommenWeergave(report);
 // Every row must remain represented; summaries/ambiguities must not silently
 // become fiscal totals, and no known case may be excluded unexpectedly.
 assert.equal(report.transactions.length, adversarialRows.length, 'Elke banktransactie moet zichtbaar blijven in het rapport.');
-assert.ok(report.audit.unresolved >= 5, 'De bewust ambigue combinaties moeten fail-closed blijven.');
+assert.ok(report.audit.unresolved >= 6, 'De bewust ambigue combinaties moeten fail-closed blijven.');
 assert.equal(view.twijfelgevallen.length, report.audit.unresolved, 'Twijfelgevallenweergave moet aansluiten op unresolved.');
 
 const byId = (id: string) => report.transactions.find(tx => tx.id === id)!;
@@ -87,7 +87,6 @@ expectKnown('a11', 'private_no_vat', 'geen', 0);
 expectKnown('a12', 'private_no_vat', 'geen', 0);
 expectKnown('a17', 'domestic_input_21', '5b', 21);
 expectKnown('a18', 'domestic_input_9', '5b', 9);
-expectKnown('a19', 'domestic_input_21', '5b', 21);
 expectKnown('a20', 'domestic_input_9', '5b', 9);
 expectKnown('a21', 'domestic_input_21', '5b', 21);
 expectKnown('a22', 'domestic_input_9', '5b', 9);
@@ -103,18 +102,18 @@ const ambiguousSale = byId('a01');
 assert.equal(ambiguousSale.vat.status, 'unknown', 'Een kale verkoopomschrijving mag niet automatisch een tarief krijgen.');
 assert.equal(ambiguousSale.includedInTotals, false, 'Een onbepaalbare verkoopregel mag de BTW-totalen niet vervuilen.');
 
-for (const id of ['a13', 'a14', 'a15', 'a16']) {
+for (const id of ['a13', 'a14', 'a15', 'a16', 'a19']) {
   const tx = byId(id);
   assert.equal(tx.vat.status, 'unknown', `${id}: ambigue bankdata mag niet gokken`);
   assert.equal(tx.includedInTotals, false, `${id}: ambigue transactie mag totalen niet vervuilen`);
 }
 
-// Explicit rate in a description may be used only when the production rule set
-// accepts the description as sufficiently deterministic. A bare merchant name
-// must never override that fail-closed boundary.
-assert.equal(byId('a19').vat.status, 'known');
-assert.equal(byId('a19').section, '5b');
-assert.equal(byId('a20').section, '5b');
+// A café description containing both an alcohol signal (normally 21%) and a
+// food signal (normally 9%) is deliberately contradictory bank data. The safe
+// production boundary must not choose one rate merely because one signal wins
+// a regex race; it must fail closed.
+assert.equal(byId('a19').vat.status, 'unknown');
+assert.equal(byId('a19').includedInTotals, false);
 
 // Reconciliation: report-level totals must remain internally consistent.
 assert.equal(report.aangifte['5a'], report.overzicht.output.total, '5a moet gelijk zijn aan verschuldigde btw.');
