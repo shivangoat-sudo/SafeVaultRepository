@@ -4,7 +4,7 @@ import { calculateFiscalVatReport, tweeKolommenWeergave } from '../btwFiscalSafe
 import { parseCsvToRawTransactions } from '../../utils/vatCsvParser';
 import type { RawTransaction } from '../btwSafeTypes';
 
-const expense = (id: string, description: string, amount_incl: number, memo = ''): RawTransaction => ({
+const expense = (id: string, description: string, amount_incl = 121, memo = ''): RawTransaction => ({
   id,
   type: 'expense',
   amount_incl,
@@ -35,10 +35,10 @@ const adversarialRows: RawTransaction[] = [
   expense('a10', 'Aflossing lening bank', 500),
   expense('a11', 'Belastingdienst btw-aangifte', 300),
   expense('a12', 'Bankkosten rekening', 12.10),
-  expense('a13', 'Café De Hoek', 121),
-  expense('a14', 'Jumbo Zakelijk boodschappen', 109),
-  expense('a15', 'Hotel De Zon all-in ontbijt', 121),
-  expense('a16', 'Kliniek Tandheelkunde cosmetisch bleken', 121),
+  expense('a13', 'Café De Hoek'),
+  expense('a14', 'Jumbo Zakelijk boodschappen'),
+  expense('a15', 'Hotel De Zon all-in ontbijt'),
+  expense('a16', 'Kliniek Tandheelkunde cosmetisch bleken'),
   expense('a17', 'Betaling leverancier 21%', 121),
   expense('a18', 'Betaling leverancier 9%', 109),
   expense('a19', 'Café De Hoek 21%', 121),
@@ -134,7 +134,7 @@ const csvWithSummary = [
   '2026-01-04;OpenAI LLC;US00TEST;Af;121,00;software',
 ].join('\n');
 const parsedSummary = parseCsvToRawTransactions(csvWithSummary);
-assert.equal(parsedSummary.length, 4, 'Alle fysieke bankregels moeten worden geparseerd.');
+assert.equal(parsedSummary.length, 4, 'Alle fysieke bankregels moeten worden geparsed.');
 const summaryReport = calculateFiscalVatReport(parsedSummary);
 assert.ok(summaryReport.ignored.length >= 2, 'Samenvattingsregels moeten worden genegeerd voor fiscale totalen.');
 assert.equal(summaryReport.aangifte['1a'].btw, 21, 'Klantberekend totaal mag 1a niet beïnvloeden.');
