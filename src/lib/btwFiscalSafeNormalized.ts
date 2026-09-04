@@ -53,9 +53,14 @@ function maskBankOnlyAmbiguity(rows: import('./btwSafeTypes').RawTransaction[]):
       /\b(?:albert\s+heijn|jumbo|plus|lidl|aldi|supermarkt|slijterij|drankenspeciaalzaak)\b/i.test(text) &&
       !/\b(?:9\s*%|21\s*%|0\s*%|geneesmiddelen?|medicijnen?|voedingsmiddelen?|alcohol|wijn|bier|sterke\s+drank|slijterij)\b/i.test(text);
 
+    const horecaMention = /\b(?:café|cafe|grand\s+café|grand\s+cafe|restaurant|horeca|hotelrestaurant)\b/i.test(text);
+    const horecaHasExplicitRate = /\b(?:9\s*%|21\s*%|0\s*%)\b/i.test(text);
+    const horecaHasAlcohol = /\b(?:alcohol|wijn|bier|sterke\s+drank|borrel|cocktail|pils)\b/i.test(text);
+    const horecaHasSpecificFoodContext = /\b(?:voedsel|maaltijd|eten|drinken|lunch|diner|ontbijt|menu)\b/i.test(text);
     const horecaAmbiguity =
-      /\b(?:café|cafe|grand\s+café|grand\s+cafe|restaurant|horeca|hotelrestaurant)\b/i.test(text) &&
-      !/\b(?:9\s*%|21\s*%|btw|alcohol|wijn|bier|sterke\s+drank|voedsel|maaltijd|eten|drinken|horeca\s+ter\s+plaatse)\b/i.test(text);
+      horecaMention &&
+      !horecaHasExplicitRate &&
+      (horecaHasAlcohol || !horecaHasSpecificFoodContext);
 
     const lodgingAmbiguity =
       /\b(?:hotel|pension|vakantiehuis|camping|overnachting|logies)\b/i.test(text) &&
@@ -91,7 +96,6 @@ function restoreOriginalText(
     const original = originalTextById.get(tx.id);
     if (!original) return tx;
     const description = original.description ?? tx.description;
-    const memo = original.memo ?? '';
     return {
       ...tx,
       description,
@@ -140,10 +144,6 @@ function addEvidenceState(report: FiscalReport): FiscalReport {
 }
 
 function rebuildAuditState(report: FiscalReport): FiscalReport {
-  // The production context bridge can replace an initial unresolved
-  // classification with a deterministic classification. The core report was
-  // calculated before that replacement, so its old unresolved warning must not
-  // survive when the final transaction set contains no unresolved rows.
   const problems = report.audit.problems.filter((problem) => {
     if (report.audit.unresolved === 0 && /vereisen boekhoudkundige beoordeling voordat het rapport fiscaal compleet is/i.test(problem)) {
       return false;
