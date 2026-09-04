@@ -62,8 +62,9 @@ export function parseCsvToRawTransactions(csvContent: string): RawTransaction[] 
         if(income&&expense) throw new Error(`CSV heeft tegenstrijdige transactierichting op regel ${i+1}.`);
         if(income) inferredDirection='income';
         else if(expense) inferredDirection='expense';
-        else if(parsed>0) inferredDirection='income';
-        else inferredDirection='expense';
+        else if(/^(?:-|\()/.test(rawAmount)) inferredDirection='expense';
+        else if(/^\+/.test(rawAmount)) inferredDirection='income';
+        else throw new Error(`Onbekende transactierichting op CSV-regel ${i+1}: ${rawDirection||'(leeg)'}`);
       }
     }
     if(parsed===null||parsed===0) continue;
