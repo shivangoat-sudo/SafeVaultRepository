@@ -65,19 +65,41 @@ function addEvidenceState(report: FiscalReport): FiscalReport {
   };
 }
 
+function rebuildAuditState(report: FiscalReport): FiscalReport {
+  // The production context bridge can replace an initial unresolved
+  // classification with a deterministic classification. The core report was
+  // calculated before that replacement, so its old unresolved warning must not
+  // survive when the final transaction set contains no unresolved rows.
+  const problems = report.audit.problems.filter((problem) => {
+    if (report.audit.unresolved === 0 && /vereisen boekhoudkundige beoordeling voordat het rapport fiscaal compleet is/i.test(problem)) {
+      return false;
+    }
+    return true;
+  });
+
+  return {
+    ...report,
+    audit: {
+      ...report.audit,
+      problems,
+      ok: problems.length === 0,
+    },
+  };
+}
+
 export function calculateFiscalVatReport(
   rows: import('./btwSafeTypes').RawTransaction[],
   overrides: Record<string, BoekhouderBeoordeling> = {},
   adjustments: FiscalAdjustments = {},
 ): FiscalReport {
   const report = calculateProductionVatReport(rows, overrides, adjustments);
-  return addEvidenceState({
+  return rebuildAuditState(addEvidenceState({
     ...report,
     overzicht: {
       ...report.overzicht,
       status: report.overzicht.status === 'af_te_drager' ? 'af_te_dragen' : 'terug_te_vorderen',
     },
-  });
+  }));
 }
 
 /**
