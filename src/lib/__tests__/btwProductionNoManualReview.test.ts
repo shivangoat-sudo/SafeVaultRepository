@@ -27,7 +27,7 @@ const view = tweeKolommenWeergave(report);
 if (report.audit.unresolved !== 0) throw new Error(`Geen enkele voorbeeldtransactie mag unresolved zijn; kreeg ${report.audit.unresolved}.`);
 if (report.audit.included !== rows.length) throw new Error(`Alle ${rows.length} transacties moeten automatisch in het berekeningsrapport staan.`);
 if (view.twijfelgevallen.length !== 0) throw new Error(`Geen enkele automatisch herkende voorbeeldtransactie mag als handmatige twijfelclassificatie worden getoond; kreeg ${view.twijfelgevallen.length}.`);
-if (report.audit.evidenceRequired !== 12) throw new Error(`Er moeten precies 12 normale aftrekbare inkooptransacties apart als bewijsgevoelig worden gemarkeerd; kreeg ${report.audit.evidenceRequired}.`);
+if (report.audit.evidenceRequired !== 13) throw new Error(`Er moeten precies 13 normale aftrekbare inkooptransacties apart als bewijsgevoelig worden gemarkeerd; kreeg ${report.audit.evidenceRequired}.`);
 if (report.audit.problems.length !== 0) throw new Error(`Het productierapport mag geen fiscale auditproblemen bevatten; kreeg ${report.audit.problems.join(' | ')}.`);
 
 const byId = (id: string) => report.transactions.find(tx => tx.id === id)!;
