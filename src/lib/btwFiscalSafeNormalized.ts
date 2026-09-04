@@ -148,7 +148,7 @@ function addEvidenceState(report: FiscalReport): FiscalReport {
 
 export function calculateFiscalVatReport(rows: RawTransaction[], overrides: Record<string, BoekhouderBeoordeling> = {}, adjustments: FiscalAdjustments = {}): FiscalReport {
   const contradictory = rows.filter(hasContradictoryFiscalEvidence);
-  const ambiguous = rows.filter((row) => !isClearlyExemptInsurance(row) && isBankOnlyAmbiguous(row));
+  const ambiguous = rows.filter((row) => !isClearlyExemptInsurance(row) && !hasContradictoryFiscalEvidence(row) && isBankOnlyAmbiguous(row));
   const insurance = rows.filter(isClearlyExemptInsurance);
   const blockedIds = new Set([...contradictory, ...ambiguous, ...insurance].map((row) => row.id));
   const classifierRows = rows.filter((row) => !blockedIds.has(row.id));
@@ -164,7 +164,7 @@ export function calculateFiscalVatReport(rows: RawTransaction[], overrides: Reco
   const included = transactions.filter((tx) => tx.includedInTotals).length;
   const unresolvedProblem = 'Een of meer transacties vereisen boekhoudkundige beoordeling door onvoldoende of tegenstrijdige bankinformatie.';
   const filteredBaseProblems = base.audit.problems.filter((problem) => !(unresolved === 0 && /vereisen boekhoudkundige beoordeling voordat het rapport fiscaal compleet is/i.test(problem)));
-  const problems = unresolved > 0 || ambiguous.length + contradictory.length > 0
+  const problems = contradictory.length > 0
     ? [...filteredBaseProblems, ...(filteredBaseProblems.includes(unresolvedProblem) ? [] : [unresolvedProblem])]
     : filteredBaseProblems;
   const normalized: FiscalReport = {
