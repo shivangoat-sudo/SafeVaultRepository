@@ -111,4 +111,28 @@ assert.equal(parsedComma[0].amount_incl, 1234.56);
 assert.equal(parsedComma[1].type, 'income');
 assert.equal(parsedComma[1].amount_incl, 109);
 
+const csvSigned = [
+  'Datum,Omschrijving,IBAN,Bedrag,Memo',
+  '2026-01-04,Kantoorbenodigdheden,NL00TEST,-121,00,zakelijk',
+  '2026-01-05,Verkoop boek 9%,NL00TEST,109,00,9%',
+].join('\n');
+const parsedSigned = parseCsvToRawTransactions(csvSigned);
+assert.equal(parsedSigned.length, 2, 'Een bankexport met alleen een gesigneerd bedrag moet worden gelezen.');
+assert.equal(parsedSigned[0].type, 'expense');
+assert.equal(parsedSigned[0].amount_incl, 121);
+assert.equal(parsedSigned[1].type, 'income');
+assert.equal(parsedSigned[1].amount_incl, 109);
+
+const csvDebitCredit = [
+  'Date,Counterparty,IBAN,Debit,Credit,Memo',
+  '2026-01-06,Laptop computer zakelijke aankoop,NL00TEST,"121,00",,,zakelijk',
+  '2026-01-07,Verkoop zakelijke dienstverlening 21%,NL00TEST,,"121,00",21%',
+].join('\n');
+const parsedDebitCredit = parseCsvToRawTransactions(csvDebitCredit);
+assert.equal(parsedDebitCredit.length, 2, 'Een bankexport met aparte debit/credit-kolommen moet worden gelezen.');
+assert.equal(parsedDebitCredit[0].type, 'expense');
+assert.equal(parsedDebitCredit[0].amount_incl, 121);
+assert.equal(parsedDebitCredit[1].type, 'income');
+assert.equal(parsedDebitCredit[1].amount_incl, 121);
+
 console.log('OK: broad bank-file coverage, fiscal direction, 0/9/21%, reverse charge, no-VAT payments, evidence separation and Dutch CSV variants.');
