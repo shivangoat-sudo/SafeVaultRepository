@@ -14,6 +14,7 @@ import {
   BOEKHOUDER_PERCENTAGE_OPTIES,
   berekenBetrouwbaarheidsscore as coreBerekenBetrouwbaarheidsscore,
 } from './btwFiscalSafeCore';
+import type { RawTransaction } from './btwSafeTypes';
 
 export type FiscalReport = Omit<CoreFiscalReport, 'overzicht'> & {
   overzicht: Omit<CoreFiscalReport['overzicht'], 'status'> & {
@@ -31,224 +32,159 @@ function toCoreReport(report: FiscalReport): CoreFiscalReport {
   };
 }
 
-function normalizedText(row: import('./btwSafeTypes').RawTransaction): string {
-  return `${row.description ?? ''} ${row.memo ?? ''}`.replace(/\s+/g, ' ').trim();
-}
+const normalizedText = (row: RawTransaction) => `${row.description ?? ''} ${row.memo ?? ''}`.replace(/\s+/g, ' ').trim();
 
-function isBankOnlyAmbiguous(row: import('./btwSafeTypes').RawTransaction): boolean {
+function isBankOnlyAmbiguous(row: RawTransaction): boolean {
   const text = normalizedText(row);
   if (!text) return false;
-
   const retailMention = /\b(?:albert\s+heijn|jumbo|plus|lidl|aldi|supermarkt|slijterij|drankenspeciaalzaak)\b/i.test(text);
   const retailSpecific = /(?:9\s*%|21\s*%|0\s*%|geneesmiddelen?|medicijnen?|voedingsmiddelen?|alcohol|wijn|bier|sterke\s+drank)/i.test(text);
-
   const horecaMention = /(?:café|cafe|grand\s+café|grand\s+cafe|restaurant|horeca|hotelrestaurant)/i.test(text);
   const horecaSpecificRate = /(?:9\s*%|21\s*%|0\s*%)/i.test(text);
   const horecaAlcohol = /(?:alcohol|wijn|bier|sterke\s+drank|borrel|cocktail|pils)/i.test(text);
   const horecaFood = /(?:voedsel|maaltijd|eten|drinken|lunch|diner|ontbijt|menu)/i.test(text);
-
   const lodgingMention = /\b(?:hotel|pension|vakantiehuis|camping|overnachting|logies)\b/i.test(text);
   const lodgingMixed = /\b(?:all[- ]?in|ontbijt|restaurant|diner|lunch|zwembad|spa|faciliteit|pakket)\b/i.test(text);
   const lodgingSpecific = /(?:9\s*%|21\s*%|gesplitst|splitsing|factuur)/i.test(text);
-
   const medicalMention = /\b(?:tandarts|tandheelkunde|kliniek|medische\s+behandeling|zorgkliniek)\b/i.test(text);
   const medicalCosmetic = /\b(?:cosmetisch|cosmetica|bleken|whitening|esthetisch|lip|botox|filler|schoonheids)\b/i.test(text);
-
-  return (
-    (retailMention && !retailSpecific) ||
-    (horecaMention && !horecaSpecificRate && (horecaAlcohol || !horecaFood)) ||
-    (lodgingMention && lodgingMixed && !lodgingSpecific) ||
-    (medicalMention && medicalCosmetic)
-  );
+  return (retailMention && !retailSpecific)
+    || (horecaMention && !horecaSpecificRate && (horecaAlcohol || !horecaFood))
+    || (lodgingMention && lodgingMixed && !lodgingSpecific)
+    || (medicalMention && medicalCosmetic);
 }
 
-function hasContradictoryFiscalEvidence(row: import('./btwSafeTypes').RawTransaction): boolean {
+function hasContradictoryFiscalEvidence(row: RawTransaction): boolean {
   const text = normalizedText(row);
   if (!text) return false;
   const rates = new Set<number>();
   for (const match of text.matchAll(/(?:^|[^0-9])(0|9|21)\s*%(?:[^0-9]|$)/gi)) rates.add(Number(match[1]));
-  if (rates.size > 1) return true;
   const reverse = /\b(?:btw\s*verlegd|btw-verlegd|verlegde btw|reverse\s*charge)\b/i.test(text);
   const exemption = /\b(?:vrijgesteld|vrijstelling|btw-vrij)\b/i.test(text);
-  if (reverse && (rates.size > 0 || exemption)) return true;
-  if (exemption && rates.size > 0) return true;
-  return false;
+  return rates.size > 1 || (reverse && (rates.size > 0 || exemption)) || (exemption && rates.size > 0);
 }
 
-function maskRowsByPredicate(rows: import('./btwSafeTypes').RawTransaction[], predicate: (row: import('./btwSafeTypes').RawTransaction) => boolean, marker: string): {
-  rows: import('./btwSafeTypes').RawTransaction[];
-  originalTextById: Map<string, { description?: string; memo?: string }>;
-} {
-  const originalTextById = new Map<string, { description?: string; memo?: string }>();
-  const masked = rows.map((row) => {
-    if (!predicate(row)) return row;
-    originalTextById.set(row.id, { description: row.description, memo: row.memo });
-    return { ...row, description: marker, memo: '' };
-  });
-  return { rows: masked, originalTextById };
-}
-
-function maskAmbiguousRows(rows: import('./btwSafeTypes').RawTransaction[]): {
-  rows: import('./btwSafeTypes').RawTransaction[];
-  originalTextById: Map<string, { description?: string; memo?: string }>;
-} {
-  return maskRowsByPredicate(rows, isBankOnlyAmbiguous, '[SafeVault: ambigue bankomschrijving - geen automatische fiscale classificatie]');
-}
-
-function isClearlyExemptInsurance(row: import('./btwSafeTypes').RawTransaction): boolean {
+function isClearlyExemptInsurance(row: RawTransaction): boolean {
   if (row.type !== 'expense') return false;
   const text = normalizedText(row);
-  if (!text) return false;
   return /\b(?:verzekeringspremie|verzekering(?:s)?premie|premie\s+(?:verzekering|zorgverzekering|autoverzekering|aansprakelijkheidsverzekering|beroepsaansprakelijkheidsverzekering|rechtsbijstandverzekering|arbeidsongeschiktheidsverzekering|inboedelverzekering|opstalverzekering|reisverzekering)|zorgverzekering|autoverzekering|aansprakelijkheidsverzekering|beroepsaansprakelijkheidsverzekering|rechtsbijstandverzekering|arbeidsongeschiktheidsverzekering|inboedelverzekering|opstalverzekering|reisverzekering)\b/i.test(text);
 }
 
-function maskClearlyExemptInsuranceRows(rows: import('./btwSafeTypes').RawTransaction[]): {
-  rows: import('./btwSafeTypes').RawTransaction[];
-  originalTextById: Map<string, { description?: string; memo?: string }>;
-} {
-  return maskRowsByPredicate(rows, isClearlyExemptInsurance, '[SafeVault: vrijgesteld verzekeringspremie]');
-}
-
-function mergeOriginalTexts(
-  first: Map<string, { description?: string; memo?: string }>,
-  second: Map<string, { description?: string; memo?: string }>,
-  third: Map<string, { description?: string; memo?: string }>,
-): Map<string, { description?: string; memo?: string }> {
-  const merged = new Map(first);
-  for (const [id, value] of second) merged.set(id, value);
-  for (const [id, value] of third) merged.set(id, value);
-  return merged;
-}
-
-function applyClearlyExemptInsuranceClassifications(report: CoreFiscalReport, sourceRows: import('./btwSafeTypes').RawTransaction[]): CoreFiscalReport {
-  const sourceById = new Map(sourceRows.map((row) => [row.id, row]));
-  const matchedIds = new Set(sourceRows.filter(isClearlyExemptInsurance).map((row) => row.id));
-  if (!matchedIds.size) return report;
-
-  const transactions = report.transactions.map((tx): FiscalTransaction => {
-    if (!matchedIds.has(tx.id)) return tx;
-    const source = sourceById.get(tx.id);
-    if (!source) return tx;
-    return {
-      ...tx,
-      classification: 'exempt_input',
-      section: '5b',
-      amount_excl: Number(source.amount_incl.toFixed(2)),
-      vat: { status: 'known', rate: 0, amount: 0 },
-      deductible: false,
-      evidenceRequired: false,
-      evidenceStatus: 'not_required',
-      confidence: 'high',
-      includedInTotals: true,
-      reason: 'Verzekeringspremie herkend als btw-vrijgestelde premie; geen btw-bedrag uit de banktransactie gefabriceerd.',
-      rule: {
-        ...tx.rule,
-        classification: 'exempt_input',
-        section: '5b',
-        wetsbasis: 'Belastingdienst – Vrijstelling voor verzekeringen en diensten door tussenpersonen',
-        explanation: 'Verzekeringspremie: btw-vrijgesteld; andere verzekeraar-diensten kunnen wel belast zijn.',
-        requiresEvidence: false,
-      },
-      transactie_id: tx.transactie_id,
-      omschrijving: source.description ?? tx.omschrijving,
-      bedrag: Number(source.amount_incl.toFixed(2)),
-      btw: 0,
-      toegepaste_regel: 'Verzekeringspremie: vrijgesteld van btw.',
-    };
-  });
-
-  const known = transactions.filter((tx) => tx.classification !== 'unresolved').length;
-  const unresolved = transactions.filter((tx) => tx.classification === 'unresolved').length;
-  const included = transactions.filter((tx) => tx.includedInTotals).length;
-  const problems = unresolved === 0
-    ? report.audit.problems.filter((problem) => !/vereisen boekhoudkundige beoordeling voordat het rapport fiscaal compleet is/i.test(problem))
-    : report.audit.problems;
-
+function unresolvedTransaction(row: RawTransaction, reason: string): FiscalTransaction {
   return {
-    ...report,
-    transactions,
-    audit: { ...report.audit, known, unresolved, included, problems, ok: problems.length === 0 },
+    id: row.id,
+    date: row.date,
+    description: row.description,
+    type: row.type,
+    amount_incl_input: row.amount_incl,
+    amount_excl: null,
+    vat: { status: 'unknown', rate: null, amount: null },
+    classification: 'unresolved',
+    section: 'geen',
+    deductible: false,
+    evidenceRequired: true,
+    evidenceStatus: 'required',
+    confidence: 'low',
+    includedInTotals: false,
+    reason,
+    rule: {
+      classification: 'unresolved',
+      section: 'geen',
+      wetsbasis: 'BTW safety gate',
+      explanation: reason,
+      requiresEvidence: true,
+    },
+    transactie_id: row.id,
+    omschrijving: row.description ?? '',
+    bedrag: row.amount_incl,
+    btw: null,
+    toegepaste_regel: 'Geen automatische fiscale classificatie; beoordeling vereist.',
   };
 }
 
-function restoreOriginalText(
-  report: FiscalReport,
-  originalTextById: Map<string, { description?: string; memo?: string }>,
-): FiscalReport {
-  if (!originalTextById.size) return report;
+function exemptInsuranceTransaction(row: RawTransaction): FiscalTransaction {
   return {
-    ...report,
-    transactions: report.transactions.map((tx) => {
-      const original = originalTextById.get(tx.id);
-      if (!original) return tx;
-      const description = original.description ?? tx.description;
-      return {
-        ...tx,
-        description,
-        omschrijving: description ?? tx.omschrijving,
-        reason:
-          tx.classification === 'unresolved'
-            ? 'De bankomschrijving is niet specifiek genoeg om het tarief/de fiscale behandeling veilig vast te stellen.'
-            : tx.reason,
-      };
-    }),
+    id: row.id,
+    date: row.date,
+    description: row.description,
+    type: row.type,
+    amount_incl_input: row.amount_incl,
+    amount_excl: Number(row.amount_incl.toFixed(2)),
+    vat: { status: 'known', rate: 0, amount: 0 },
+    classification: 'exempt_input',
+    section: '5b',
+    deductible: false,
+    evidenceRequired: false,
+    evidenceStatus: 'not_required',
+    confidence: 'high',
+    includedInTotals: true,
+    reason: 'Verzekeringspremie herkend als btw-vrijgesteld; geen btw-bedrag uit de banktransactie gefabriceerd.',
+    rule: {
+      classification: 'exempt_input',
+      section: '5b',
+      wetsbasis: 'Belastingdienst – vrijstelling voor verzekeringen',
+      explanation: 'Verzekeringspremie: vrijgesteld van btw; andere verzekeraar-diensten kunnen wel belast zijn.',
+      requiresEvidence: false,
+    },
+    transactie_id: row.id,
+    omschrijving: row.description ?? '',
+    bedrag: Number(row.amount_incl.toFixed(2)),
+    btw: 0,
+    toegepaste_regel: 'Verzekeringspremie: vrijgesteld van btw.',
   };
 }
 
 function addEvidenceState(report: FiscalReport): FiscalReport {
-  const transactions: FiscalTransaction[] = report.transactions.map((tx) => {
-    const needsDocument =
-      tx.type === 'expense' &&
-      tx.deductible &&
-      (tx.classification === 'domestic_input_21' ||
-        tx.classification === 'domestic_input_9' ||
-        tx.classification === 'domestic_reverse_charge' ||
-        tx.classification === 'eu_reverse_charge' ||
-        tx.classification === 'non_eu_reverse_charge');
-    if (!needsDocument) return tx;
-    return {
-      ...tx,
-      evidenceRequired: true,
-      evidenceStatus: tx.evidenceStatus === 'human_confirmed' ? 'human_confirmed' : 'required',
-    };
+  const transactions = report.transactions.map((tx) => {
+    const needsDocument = tx.type === 'expense' && tx.deductible && (
+      tx.classification === 'domestic_input_21' || tx.classification === 'domestic_input_9' ||
+      tx.classification === 'domestic_reverse_charge' || tx.classification === 'eu_reverse_charge' ||
+      tx.classification === 'non_eu_reverse_charge'
+    );
+    return needsDocument ? { ...tx, evidenceRequired: true, evidenceStatus: tx.evidenceStatus === 'human_confirmed' ? 'human_confirmed' as const : 'required' as const } : tx;
   });
+  return { ...report, transactions, audit: { ...report.audit, evidenceRequired: transactions.filter((tx) => tx.evidenceRequired).length } };
+}
 
-  return {
-    ...report,
+export function calculateFiscalVatReport(rows: RawTransaction[], overrides: Record<string, BoekhouderBeoordeling> = {}, adjustments: FiscalAdjustments = {}): FiscalReport {
+  const contradictory = rows.filter(hasContradictoryFiscalEvidence);
+  const ambiguous = rows.filter((row) => !isClearlyExemptInsurance(row) && isBankOnlyAmbiguous(row));
+  const insurance = rows.filter(isClearlyExemptInsurance);
+  const blockedIds = new Set([...contradictory, ...ambiguous, ...insurance].map((row) => row.id));
+  const classifierRows = rows.filter((row) => !blockedIds.has(row.id));
+  const base = calculateProductionVatReport(classifierRows, overrides, adjustments);
+  const appended: FiscalTransaction[] = [
+    ...insurance.map(exemptInsuranceTransaction),
+    ...contradictory.map((row) => unresolvedTransaction(row, 'Tegenstrijdige fiscale signalen in de bankomschrijving; geen tarief of verleggingsbehandeling gegokt.')),
+    ...ambiguous.map((row) => unresolvedTransaction(row, 'De bankomschrijving is niet specifiek genoeg om de fiscale behandeling veilig vast te stellen.')),
+  ];
+  const transactions = [...base.transactions, ...appended];
+  const unresolved = transactions.filter((tx) => tx.classification === 'unresolved').length;
+  const known = transactions.length - unresolved;
+  const included = transactions.filter((tx) => tx.includedInTotals).length;
+  const problems = [
+    ...base.audit.problems,
+    ...((contradictory.length + ambiguous.length) > 0 ? ['Een of meer transacties vereisen boekhoudkundige beoordeling door onvoldoende of tegenstrijdige bankinformatie.'] : []),
+  ];
+  const normalized: FiscalReport = {
+    ...base,
     transactions,
-    audit: { ...report.audit, evidenceRequired: transactions.filter((tx) => tx.evidenceRequired).length },
-  };
-}
-
-function rebuildAuditState(report: FiscalReport): FiscalReport {
-  const problems = report.audit.problems.filter((problem) => {
-    if (report.audit.unresolved === 0 && /vereisen boekhoudkundige beoordeling voordat het rapport fiscaal compleet is/i.test(problem)) return false;
-    return true;
-  });
-  return { ...report, audit: { ...report.audit, problems, ok: problems.length === 0 } };
-}
-
-export function calculateFiscalVatReport(
-  rows: import('./btwSafeTypes').RawTransaction[],
-  overrides: Record<string, BoekhouderBeoordeling> = {},
-  adjustments: FiscalAdjustments = {},
-): FiscalReport {
-  const contradictory = maskRowsByPredicate(rows, hasContradictoryFiscalEvidence, '[SafeVault: tegenstrijdige fiscale signalen - geen automatische classificatie]');
-  const ambiguous = maskAmbiguousRows(contradictory.rows);
-  const insurance = maskClearlyExemptInsuranceRows(ambiguous.rows);
-  const classifierRows = insurance.rows;
-  const originalTextById = mergeOriginalTexts(contradictory.originalTextById, ambiguous.originalTextById, insurance.originalTextById);
-  const report = calculateProductionVatReport(classifierRows, overrides, adjustments);
-  const insuranceClassifiedCore = applyClearlyExemptInsuranceClassifications(report, rows);
-  const insuranceClassified: FiscalReport = {
-    ...insuranceClassifiedCore,
     overzicht: {
-      ...insuranceClassifiedCore.overzicht,
-      status: insuranceClassifiedCore.overzicht.status === 'af_te_drager' ? 'af_te_dragen' : 'terug_te_vorderen',
+      ...base.overzicht,
+      status: base.overzicht.status === 'af_te_drager' ? 'af_te_dragen' : 'terug_te_vorderen',
+    },
+    audit: {
+      ...base.audit,
+      input: rows.length,
+      known,
+      unresolved,
+      included,
+      evidenceRequired: transactions.filter((tx) => tx.evidenceRequired).length,
+      problems,
+      ok: problems.length === 0,
     },
   };
-  const restored = restoreOriginalText(insuranceClassified, originalTextById);
-  return rebuildAuditState(addEvidenceState(restored));
+  return addEvidenceState(normalized);
 }
 
 export function tweeKolommenWeergave(report: FiscalReport) {
