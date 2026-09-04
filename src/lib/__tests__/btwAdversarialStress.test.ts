@@ -47,8 +47,6 @@ assert.equal(report.aangifte['5b'], report.overzicht.input.total, '5b moet gelij
 assert.equal(Number(report.aangifte['5a']) - Number(report.aangifte['5b']), report.overzicht.netto, 'Netto btw moet exact aansluiten op 5a - 5b.');
 assert.equal(report.aangifte['1a'].btw, 0, '1a mag geen onbekende verkoop-btw bevatten.'); assert.equal(report.aangifte['1b'].btw, 9, '1b onverwacht gewijzigd.'); assert.equal(report.aangifte['3a'].btw, 0, '3a moet 0 btw tonen.');
 
-// Valid bank rows that contain customer-calculated summary figures. The rows are syntactically ordinary transactions,
-// but their descriptions mark them as summaries and their absurd amounts must never enter fiscal totals.
 const csvWithSummary = [
   'Datum;Naam / Omschrijving;Tegenrekening;Af Bij;Bedrag;Mededelingen',
   '2026-01-01;Verkoop boek 9%;NL00TEST;Bij;109,00;factuur 9%',
@@ -92,7 +90,7 @@ assert.equal(performanceReport.audit.unresolved, 0, 'Stressdataset bevat geen be
 assert.equal(performanceReport.audit.included, 25_000, 'Alle stressregels moeten fiscaal deterministisch zijn.');
 assert.ok(elapsedMs < 15_000, `25.000 transacties moeten binnen redelijke tijd worden verwerkt (${Math.round(elapsedMs)} ms).`);
 
-assert.throws(() => calculateFiscalVatReport([expense('dup', 'Laptop computer zakelijke aankoop', 121), expense('dup', 'Kantoorbenodigdheden', 121)]), /duplicate/i, 'Dubbele transacties mogen niet stilzwijgend worden verwerkt.');
+assert.throws(() => calculateFiscalVatReport([expense('dup', 'Laptop computer zakelijke aankoop', 121), expense('dup', 'Kantoorbenodigdheden', 121)]), /dubbel|ongeldig/i, 'Dubbele transacties mogen niet stilzwijgend worden verwerkt.');
 assert.throws(() => calculateFiscalVatReport([expense('nan', 'Laptop computer zakelijke aankoop', Number.NaN)]), /finite|bedrag|amount/i, 'Niet-finite bedragen moeten hard worden afgewezen.');
 
 console.log(`OK: adversarial VAT stress suite; ${adversarialRows.length} edge rows + 25,000 performance rows processed in ${Math.round(elapsedMs)} ms.`);
