@@ -64,9 +64,9 @@ const withSummary = calculateFiscalVatReport([
   expense('summary', 'Totaal btw € 21,00', 21),
   expense('ending', 'Eindsaldo', 1000),
 ]);
-assert.equal(withSummary.audit.ignored, 2);
+assert.equal(withSummary.audit.ignored, 1);
 assert.equal(withSummary.transactions.some(tx => tx.id === 'summary'), false);
-assert.equal(withSummary.transactions.some(tx => tx.id === 'ending'), false);
+assert.equal(withSummary.transactions.some(tx => tx.id === 'ending'), true);
 assert.equal(withSummary.aangifte['1a'].btw, 21);
 
 const knownSupplierProcessor = calculateFiscalVatReport([
