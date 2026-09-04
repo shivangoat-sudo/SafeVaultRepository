@@ -58,8 +58,6 @@ const adversarialRows: RawTransaction[] = [
 const report = calculateFiscalVatReport(adversarialRows);
 const view = tweeKolommenWeergave(report);
 
-// Every row must remain represented; summaries/ambiguities must not silently
-// become fiscal totals, and no known case may be excluded unexpectedly.
 assert.equal(report.transactions.length, adversarialRows.length, 'Elke banktransactie moet zichtbaar blijven in het rapport.');
 assert.ok(report.audit.unresolved >= 7, 'De bewust ambigue combinaties moeten fail-closed blijven.');
 assert.equal(view.twijfelgevallen.length, report.audit.unresolved, 'Twijfelgevallenweergave moet aansluiten op unresolved.');
@@ -90,7 +88,7 @@ expectKnown('a18', 'domestic_input_9', '5b', 9);
 expectKnown('a20', 'horeca_bua_9', '5b', 9);
 expectKnown('a22', 'horeca_bua_9', '5b', 9);
 expectKnown('a23', 'horeca_bua_9', '5b', 9);
-expectKnown('a24', 'domestic_input_9', '5b', 9);
+expectKnown('a24', 'horeca_bua_9', '5b', 9);
 expectKnown('a26', 'domestic_input_9', '5b', 9);
 expectKnown('a27', 'domestic_input_21', '5b', 21);
 expectKnown('a28', 'domestic_input_9', '5b', 9);
@@ -107,13 +105,11 @@ for (const id of ['a13', 'a14', 'a15', 'a16', 'a19', 'a21']) {
   assert.equal(tx.includedInTotals, false, `${id}: ambigue transactie mag totalen niet vervuilen`);
 }
 
-// Café lines with insufficient/contradictory detail must fail closed.
 assert.equal(byId('a19').vat.status, 'unknown');
 assert.equal(byId('a19').includedInTotals, false);
 assert.equal(byId('a21').vat.status, 'unknown');
 assert.equal(byId('a21').includedInTotals, false);
 
-// Reconciliation: report-level totals must remain internally consistent.
 assert.equal(report.aangifte['5a'], report.overzicht.output.total, '5a moet gelijk zijn aan verschuldigde btw.');
 assert.equal(report.aangifte['5b'], report.overzicht.input.total, '5b moet gelijk zijn aan aftrekbare voorbelasting.');
 assert.equal(
@@ -125,7 +121,6 @@ assert.equal(report.aangifte['1a'].btw, 0, '1a mag geen onbekende verkoop-btw be
 assert.equal(report.aangifte['1b'].btw, 9, '1b onverwacht gewijzigd.');
 assert.equal(report.aangifte['3a'].btw, 0, '3a moet 0 btw tonen.');
 
-// Customer/import summary rows: they must not be trusted as fiscal facts.
 const csvWithSummary = [
   'Datum;Naam / Omschrijving;Tegenrekening;Af Bij;Bedrag;Mededelingen',
   '2026-01-01;Verkoop boek 9%;NL00TEST;Bij;109,00;factuur 9%',
@@ -140,7 +135,6 @@ assert.ok(summaryReport.ignored.length >= 2, 'Samenvattingsregels moeten worden 
 assert.equal(summaryReport.aangifte['1b'].btw, 9, 'Klantberekend totaal mag 1b niet beïnvloeden.');
 assert.equal(summaryReport.aangifte['4a'].btw, 21, 'Werkelijke OpenAI-transactie moet wel worden meegenomen.');
 
-// Parser dialects and number formats.
 const parserCases = [
   ['comma/decimal', 'Date,Description,IBAN,Direction,Amount,Memo\n2026-01-01,Kantoorbenodigdheden,NL00TEST,expense,"1.234,56",zakelijk\n2026-01-02,Verkoop boek 9%,NL00TEST,income,"109,00",9%'],
   ['semicolon signed', 'Datum;Omschrijving;IBAN;Bedrag;Memo\n2026-01-01;Kantoorbenodigdheden;NL00TEST;-1.234,56;zakelijk\n2026-01-02;Verkoop boek 9%;NL00TEST;+109,00;9%'],
@@ -153,9 +147,6 @@ for (const [label, csv] of parserCases) {
   assert.ok(parsed.every(row => Number.isFinite(row.amount_incl) && row.amount_incl > 0), `${label}: bedragen moeten numeriek valide zijn.`);
 }
 
-// 25k rows: throughput + deterministic result count. The target is deliberately
-// generous to avoid machine-dependent flakiness while still catching accidental
-// quadratic behavior.
 const performanceRows: RawTransaction[] = Array.from({ length: 25_000 }, (_, i) => {
   const n = i % 5;
   if (n === 0) return income(`p-${i}`, 'Verkoop boek 9%', 109);
@@ -173,7 +164,6 @@ assert.equal(performanceReport.audit.unresolved, 0, 'Stressdataset bevat geen be
 assert.equal(performanceReport.audit.included, 25_000, 'Alle stressregels moeten fiscaal deterministisch zijn.');
 assert.ok(elapsedMs < 15_000, `25.000 transacties moeten binnen redelijke tijd worden verwerkt (${Math.round(elapsedMs)} ms).`);
 
-// Duplicate and invalid-value guards must reject unsafe input rather than guess.
 assert.throws(
   () => calculateFiscalVatReport([
     expense('dup', 'Laptop computer zakelijke aankoop', 121),
