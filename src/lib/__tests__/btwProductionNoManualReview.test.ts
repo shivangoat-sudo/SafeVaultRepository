@@ -38,6 +38,11 @@ const expect = (id: string, classification: string, section: string, rate: numbe
   if (tx.vat.status !== 'known' || tx.vat.rate !== rate) throw new Error(`${id}: verkeerde btw-behandeling`);
   if (tx.deductible !== deductible) throw new Error(`${id}: verkeerde aftrekbaarheid`);
 };
+const vatAmount = (id: string) => {
+  const vat = byId(id).vat;
+  if (vat.status !== 'known') throw new Error(`${id}: btw-bedrag ontbreekt ondanks bekende classificatie.`);
+  return vat.amount;
+};
 
 expect('openai', 'non_eu_reverse_charge', '4a', 21, true);
 expect('anthropic', 'non_eu_reverse_charge', '4a', 21, true);
@@ -58,11 +63,11 @@ expect('didi', 'domestic_input_21', '5b', 21, true);
 expect('lawyer', 'domestic_input_21', '5b', 21, true);
 
 const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
-const sum = (ids: string[]) => round2(ids.reduce((total, id) => total + byId(id).vat.amount, 0));
+const sum = (ids: string[]) => round2(ids.reduce((total, id) => total + vatAmount(id), 0));
 const expected4a = round2((24.20 + 30 + 19 + 21 + 24.20 + 20) * 0.21);
 const expected4b = round2((149 + 62.91 + 68.45) * 0.21);
-const expected5b = round2(sum(['openai','anthropic','elevenlabs','netlify','github','resend','adobe','apple','google','postnl','ah','didi','lawyer']));
-const expectedNonDeductible = round2(sum(['cafe','grand-cafe']));
+const expected5b = sum(['openai','anthropic','elevenlabs','netlify','github','resend','adobe','apple','google','postnl','ah','didi','lawyer']);
+const expectedNonDeductible = sum(['cafe','grand-cafe']);
 
 if (report.aangifte['4a'].grondslag !== 138.40 || report.aangifte['4a'].btw !== expected4a)
   throw new Error(`Rubriek 4a is onjuist: ${JSON.stringify(report.aangifte['4a'])}; verwacht grondslag 138.40 en btw ${expected4a}.`);
