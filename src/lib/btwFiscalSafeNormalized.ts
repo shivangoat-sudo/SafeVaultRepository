@@ -5,7 +5,6 @@ import { BOEKHOUDER_PERCENTAGE_OPTIES, berekenBetrouwbaarheidsscore as coreBerek
 import type { RawTransaction } from './btwSafeTypes';
 
 export type FiscalReport = Omit<CoreFiscalReport, 'overzicht'> & { overzicht: Omit<CoreFiscalReport['overzicht'], 'status'> & { status: 'af_te_dragen' | 'terug_te_vorderen' } };
-
 function toCoreReport(report: FiscalReport): CoreFiscalReport { return { ...report, overzicht: { ...report.overzicht, status: report.overzicht.status === 'af_te_dragen' ? 'af_te_drager' : 'terug_te_vorderen' } }; }
 const normalizedText = (row: RawTransaction) => `${row.description ?? ''} ${row.memo ?? ''}`.replace(/\s+/g, ' ').trim();
 
@@ -35,7 +34,7 @@ function hasContradictoryFiscalEvidence(row: RawTransaction): boolean {
 
 function hasContradictoryContext(row: RawTransaction): boolean {
   const text = normalizedText(row); if (!text || hasContradictoryFiscalEvidence(row)) return false;
-  const nineContext = /\b(?:voedingsmiddelen|levensmiddelen|boodschappen|bloemen|bloemboeket|planten|geneesmiddelen|medicijnen|boek|boeken|dagblad|tijdschrift|periodiek|kapper|kapsalon|fietsenmaker|fietsreparatie|schoenenreparatie|schoenmaker|kledingreparatie|personenvervoer|taxi|openbaar vervoer|ov-chipkaart|treinreis|busreis|tramreis|metroreis|museum|theater|concert|bioscoop|sportclub|zwembad|sauna)\b|\bpath[eé]\b|\b(?:café|cafe|grand\s+café|grand\s+cafe|restaurant|horeca)\b/i.test(text);
+  const nineContext = /(?:\bvoedingsmiddelen\b|\blevensmiddelen\b|\bboodschappen\b|\bbloemen\b|\bbloemboeket\b|\bplanten\b|\bgeneesmiddelen\b|\bmedicijnen\b|\bboeken\b|\bboek\b|\bdagblad\b|\btijdschrift\b|\bperiodiek\b|\bkapper\b|\bkapsalon\b|\bfietsenmaker\b|\bfietsreparatie\b|\bschoenenreparatie\b|\bschoenmaker\b|\bkledingreparatie\b|\bpersonenvervoer\b|\btaxi\b|\bopenbaar vervoer\b|\bov-chipkaart\b|\btreinreis\b|\bbusreis\b|\btramreis\b|\bmetroreis\b|\bmuseum\b|\btheater\b|\bconcert\b|\bbioscoop\b|\bsportclub\b|\bzwembad\b|\bsauna\b|path(?:e|é)(?![a-zà-ÿ])|\b(?:café|cafe|grand\s+café|grand\s+cafe|restaurant|horeca)\b)/i.test(text);
   const twentyOneContext = /\b(?:kantoorbenodigdheden|bureau|bureaustoel|printer|monitor|laptop|computer|hardware|elektronica|gereedschap|meubilair|meubel|drukwerk|verpakking|brandstof|benzine|diesel|website|hosting|software|licentie|consultancy|advies|accountant|boekhouding|notaris|telecom|internet|telefoon|verzekering)\b/i.test(text);
   const noVatContext = /\b(?:loon|salaris|payroll|nettoloon|dividend|lening|aflossing|belastingdienst|inkomstenbelasting|vennootschapsbelasting|loonheffing|btw-aangifte|belastingaanslag|bankkosten|rekeningkosten|payment fee|transactiekosten|betalingskosten)\b/i.test(text);
   const foreignSupplier = /\b(?:openai(?:\s+llc)?|elevenlabs(?:\s+inc)?|anthropic(?:\s+pbc)?|netlify(?:\s+inc)?|github(?:\s+inc)?|resend(?:\s+inc)?|adobe\s+systems?\s+software|apple\s+distribution\s+international|google\s+cloud\s+emea)\b/i.test(text);
@@ -46,22 +45,9 @@ function isClearlyExemptInsurance(row: RawTransaction): boolean {
   if (row.type !== 'expense') return false; const text = normalizedText(row);
   return /\b(?:verzekeringspremie|verzekering(?:s)?premie|premie\s+(?:verzekering|zorgverzekering|autoverzekering|aansprakelijkheidsverzekering|beroepsaansprakelijkheidsverzekering|rechtsbijstandverzekering|arbeidsongeschiktheidsverzekering|inboedelverzekering|opstalverzekering|reisverzekering)|zorgverzekering|autoverzekering|aansprakelijkheidsverzekering|beroepsaansprakelijkheidsverzekering|rechtsbijstandverzekering|arbeidsongeschiktheidsverzekering|inboedelverzekering|opstalverzekering|reisverzekering)\b/i.test(text);
 }
-
-function unresolvedTransaction(row: RawTransaction, reason: string): FiscalTransaction {
-  return { id: row.id, date: row.date, description: row.description, type: row.type, amount_incl_input: row.amount_incl, amount_excl: null, vat: { status: 'unknown', rate: null, amount: null }, classification: 'unresolved', section: 'geen', deductible: false, evidenceRequired: true, evidenceStatus: 'required', confidence: 'low', includedInTotals: false, reason, rule: { classification: 'unresolved', section: 'geen', wetsbasis: 'BTW safety gate', explanation: reason, requiresEvidence: true }, transactie_id: row.id, omschrijving: row.description ?? '', bedrag: row.amount_incl, btw: null, toegepaste_regel: 'Geen automatische fiscale classificatie; beoordeling vereist.' };
-}
-
-function exemptInsuranceTransaction(row: RawTransaction): FiscalTransaction {
-  return { id: row.id, date: row.date, description: row.description, type: row.type, amount_incl_input: row.amount_incl, amount_excl: Number(row.amount_incl.toFixed(2)), vat: { status: 'known', rate: 0, amount: 0 }, classification: 'exempt_input', section: '5b', deductible: false, evidenceRequired: false, evidenceStatus: 'not_required', confidence: 'high', includedInTotals: true, reason: 'Verzekeringspremie herkend als btw-vrijgesteld; geen btw-bedrag uit de banktransactie gefabriceerd.', rule: { classification: 'exempt_input', section: '5b', wetsbasis: 'Belastingdienst – vrijstelling voor verzekeringen', explanation: 'Verzekeringspremie: vrijgesteld van btw; andere verzekeraar-diensten kunnen wel belast zijn.', requiresEvidence: false }, transactie_id: row.id, omschrijving: row.description ?? '', bedrag: Number(row.amount_incl.toFixed(2)), btw: 0, toegepaste_regel: 'Verzekeringspremie: vrijgesteld van btw.' };
-}
-
-function addEvidenceState(report: FiscalReport): FiscalReport {
-  const transactions = report.transactions.map((tx) => {
-    const needsDocument = tx.type === 'expense' && tx.deductible && (tx.classification === 'domestic_input_21' || tx.classification === 'domestic_input_9' || tx.classification === 'domestic_reverse_charge' || tx.classification === 'eu_reverse_charge' || tx.classification === 'non_eu_reverse_charge');
-    return needsDocument ? { ...tx, evidenceRequired: true, evidenceStatus: tx.evidenceStatus === 'human_confirmed' ? 'human_confirmed' as const : 'required' as const } : tx;
-  });
-  return { ...report, transactions, audit: { ...report.audit, evidenceRequired: transactions.filter((tx) => tx.evidenceRequired).length } };
-}
+function unresolvedTransaction(row: RawTransaction, reason: string): FiscalTransaction { return { id: row.id, date: row.date, description: row.description, type: row.type, amount_incl_input: row.amount_incl, amount_excl: null, vat: { status: 'unknown', rate: null, amount: null }, classification: 'unresolved', section: 'geen', deductible: false, evidenceRequired: true, evidenceStatus: 'required', confidence: 'low', includedInTotals: false, reason, rule: { classification: 'unresolved', section: 'geen', wetsbasis: 'BTW safety gate', explanation: reason, requiresEvidence: true }, transactie_id: row.id, omschrijving: row.description ?? '', bedrag: row.amount_incl, btw: null, toegepaste_regel: 'Geen automatische fiscale classificatie; beoordeling vereist.' }; }
+function exemptInsuranceTransaction(row: RawTransaction): FiscalTransaction { return { id: row.id, date: row.date, description: row.description, type: row.type, amount_incl_input: row.amount_incl, amount_excl: Number(row.amount_incl.toFixed(2)), vat: { status: 'known', rate: 0, amount: 0 }, classification: 'exempt_input', section: '5b', deductible: false, evidenceRequired: false, evidenceStatus: 'not_required', confidence: 'high', includedInTotals: true, reason: 'Verzekeringspremie herkend als btw-vrijgesteld; geen btw-bedrag uit de banktransactie gefabriceerd.', rule: { classification: 'exempt_input', section: '5b', wetsbasis: 'Belastingdienst – vrijstelling voor verzekeringen', explanation: 'Verzekeringspremie: vrijgesteld van btw; andere verzekeraar-diensten kunnen wel belast zijn.', requiresEvidence: false }, transactie_id: row.id, omschrijving: row.description ?? '', bedrag: Number(row.amount_incl.toFixed(2)), btw: 0, toegepaste_regel: 'Verzekeringspremie: vrijgesteld van btw.' }; }
+function addEvidenceState(report: FiscalReport): FiscalReport { const transactions = report.transactions.map((tx) => { const needsDocument = tx.type === 'expense' && tx.deductible && (tx.classification === 'domestic_input_21' || tx.classification === 'domestic_input_9' || tx.classification === 'domestic_reverse_charge' || tx.classification === 'eu_reverse_charge' || tx.classification === 'non_eu_reverse_charge'); return needsDocument ? { ...tx, evidenceRequired: true, evidenceStatus: tx.evidenceStatus === 'human_confirmed' ? 'human_confirmed' as const : 'required' as const } : tx; }); return { ...report, transactions, audit: { ...report.audit, evidenceRequired: transactions.filter((tx) => tx.evidenceRequired).length } }; }
 
 export function calculateFiscalVatReport(rows: RawTransaction[], overrides: Record<string, BoekhouderBeoordeling> = {}, adjustments: FiscalAdjustments = {}): FiscalReport {
   const contradictory = rows.filter((row) => hasContradictoryFiscalEvidence(row) || hasContradictoryContext(row));
@@ -79,7 +65,6 @@ export function calculateFiscalVatReport(rows: RawTransaction[], overrides: Reco
   const normalized: FiscalReport = { ...base, transactions, overzicht: { ...base.overzicht, status: base.overzicht.status === 'af_te_drager' ? 'af_te_dragen' : 'terug_te_vorderen' }, audit: { ...base.audit, input: rows.length, known, unresolved, included, evidenceRequired: transactions.filter((tx) => tx.evidenceRequired).length, problems, ok: problems.length === 0 } };
   return addEvidenceState(normalized);
 }
-
 export function tweeKolommenWeergave(report: FiscalReport) { return { zeker: report.transactions.filter((t) => t.includedInTotals && t.confidence === 'high'), twijfelgevallen: report.transactions.filter((t) => t.classification === 'unresolved' || (!t.includedInTotals && t.confidence === 'low')) }; }
 export function berekenBetrouwbaarheidsscore(report: FiscalReport) { return coreBerekenBetrouwbaarheidsscore(toCoreReport(report)); }
 export { BOEKHOUDER_PERCENTAGE_OPTIES };
