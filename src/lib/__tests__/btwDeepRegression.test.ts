@@ -75,17 +75,17 @@ for (const id of ['collision-path-office', 'collision-cafe-office', 'collision-f
   assert.equal(tx.classification, 'unresolved', `${id} must stay unresolved when context conflicts`);
 }
 
-// Merchant-only foreign recognition is intentionally blocked: supplier identity alone
-// is not enough to prove a taxable cross-border software service.
+// Known supplier identity is useful transaction context; explicit transaction
+// contradictions still stop it from overriding stronger fiscal evidence.
 const supplierBoundaryReport = calculateFiscalVatReport([
   expense('foreign-name-only', 'OpenAI LLC'),
   expense('foreign-name-goods', 'OpenAI LLC hardware aankoop'),
-  expense('eu-name-only', 'Adobe Systems'),
+  expense('eu-name-only', 'Adobe Systems Software'),
   expense('eu-software', 'Adobe Systems Software software licentie'),
 ]);
-assert.equal(supplierBoundaryReport.transactions.find((tx) => tx.id === 'foreign-name-only')?.classification, 'unresolved');
+assert.equal(supplierBoundaryReport.transactions.find((tx) => tx.id === 'foreign-name-only')?.classification, 'non_eu_reverse_charge');
 assert.equal(supplierBoundaryReport.transactions.find((tx) => tx.id === 'foreign-name-goods')?.classification, 'domestic_input_21');
-assert.equal(supplierBoundaryReport.transactions.find((tx) => tx.id === 'eu-name-only')?.classification, 'unresolved');
+assert.equal(supplierBoundaryReport.transactions.find((tx) => tx.id === 'eu-name-only')?.classification, 'eu_reverse_charge');
 assert.equal(supplierBoundaryReport.transactions.find((tx) => tx.id === 'eu-software')?.classification, 'eu_reverse_charge');
 
 // Customer-supplied calculated VAT must not influence the fiscal result.
@@ -144,12 +144,13 @@ assert.ok(elapsed < 15000, `25,000-row parse/classification regression took ${el
 
 const counts = {
   insurance: largeReport.transactions.filter((tx) => tx.classification === 'exempt_input').length,
-  reverse: largeReport.transactions.filter((tx) => tx.classification === 'eu_reverse_charge').length,
+  euReverse: largeReport.transactions.filter((tx) => tx.classification === 'eu_reverse_charge').length,
+  nonEuReverse: largeReport.transactions.filter((tx) => tx.classification === 'non_eu_reverse_charge').length,
   nine: largeReport.transactions.filter((tx) => tx.classification === 'domestic_input_9').length,
   twentyOne: largeReport.transactions.filter((tx) => tx.classification === 'domestic_input_21').length,
   unresolved: largeReport.transactions.filter((tx) => tx.classification === 'unresolved').length,
 };
-assert.deepEqual(counts, { insurance: 3125, reverse: 3125, nine: 3125, twentyOne: 6250, unresolved: 6250 });
+assert.deepEqual(counts, { insurance: 3125, euReverse: 3125, nonEuReverse: 3125, nine: 3125, twentyOne: 6250, unresolved: 6250 });
 assert.equal(tweeKolommenWeergave(largeReport).twijfelgevallen.length, 6250);
 assert.equal(largeReport.aangifte['5b'], largeReport.overzicht.input.total);
 assert.equal(largeReport.aangifte['5a'], largeReport.overzicht.output.total);
@@ -158,4 +159,4 @@ assert.equal(largeReport.aangifte['5a'], largeReport.overzicht.output.total);
 const duplicateIdRows = [expense('dup', 'Kantoorbenodigdheden'), expense('dup', 'Kantoorbenodigdheden')];
 assert.throws(() => calculateFiscalVatReport(duplicateIdRows), /duplicate|dubbel|id/i);
 
-console.log(`OK: deep VAT regression, conflict gating, supplier-boundary checks, customer-column isolation and 25,000-row physical CSV (${elapsed} ms).`);
+console.log(`OK: deep VAT regression, conflict gating, supplier-context checks, customer-column isolation and 25,000-row physical CSV (${elapsed} ms).`);
