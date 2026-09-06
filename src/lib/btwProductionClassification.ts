@@ -19,11 +19,12 @@ const isDutchBankContext = (row: RawTransaction) => {
 
 const NON_EU_SOFTWARE = [/\bopenai(?:\s+llc)?\b/i,/\belevenlabs(?:\s+inc)?\b/i,/\banthropic(?:\s+pbc)?\b/i,/\bnetlify(?:\s+inc)?\b/i,/\bgit(?:hub|hub\s+inc)\b/i,/\bresend(?:\s+inc)?\b/i];
 const EU_SOFTWARE = [/\badobe\s+systems?\s+software\b/i,/\bapple\s+distribution\s+international\b/i,/\bgoogle\s+cloud\s+emea\b/i];
+const SOFTWARE_CONTEXT = /\b(?:software|saas|licentie|licenties|abonnement|subscription|api|cloud|hosting|webhosting|platform|digitale dienst|it[-\s]?dienst|software[-\s]?dienst)\b/i;
 
 function foreignSupplierSignal(row: RawTransaction): 'eu' | 'non_eu' | null {
   if (row.type !== 'expense') return null;
   const text = textOf(row);
-  if (hasFiscalSignal(text)) return null;
+  if (hasFiscalSignal(text) || !SOFTWARE_CONTEXT.test(text)) return null;
   if (NON_EU_SOFTWARE.some(p => p.test(text))) return 'non_eu';
   if (EU_SOFTWARE.some(p => p.test(text))) return 'eu';
   return null;
@@ -82,8 +83,8 @@ function patchKnownContexts(report: FiscalReport, sourceRows: RawTransaction[]):
     const source = sourceById.get(tx.id);
     const text = `${source ? textOf(source) : ''} ${tx.description ?? ''} ${tx.omschrijving ?? ''}`.toLowerCase();
     if (hasConflictingContext(text)) return tx;
-    const isNonEuSupplier = /\bopenai(?:\s+llc)?\b|\belevenlabs(?:\s+inc)?\b|\banthropic(?:\s+pbc)?\b|\bnetlify(?:\s+inc)?\b|\bgit(?:hub|hub\s+inc)?\b|\bresend(?:\s+inc)?\b/i.test(text);
-    const isEuSupplier = /\badobe\s+systems?\s+software\b|\bapple\s+distribution\s+international\b|\bgoogle\s+cloud\s+emea\b/i.test(text);
+    const isNonEuSupplier = SOFTWARE_CONTEXT.test(text) && /\bopenai(?:\s+llc)?\b|\belevenlabs(?:\s+inc)?\b|\banthropic(?:\s+pbc)?\b|\bnetlify(?:\s+inc)?\b|\bgit(?:hub|hub\s+inc)?\b|\bresend(?:\s+inc)?\b/i.test(text);
+    const isEuSupplier = SOFTWARE_CONTEXT.test(text) && /\badobe\s+systems?\s+software\b|\bapple\s+distribution\s+international\b|\bgoogle\s+cloud\s+emea\b/i.test(text);
     if (tx.type !== 'expense') return tx;
     if (!isDutchBankContext(source ?? tx as unknown as RawTransaction) && !isNonEuSupplier && !isEuSupplier) return tx;
 
