@@ -79,11 +79,14 @@ export function parseCsvToRawTransactions(csvContent: string): RawTransaction[] 
     const parsedExcl=rawExcl?parseDutchAmount(rawExcl):null;
     const parsedVat=rawVat?parseDutchAmount(rawVat):null;
     const parsedRate=rawRate?Number(rawRate):null;
-    if(rawExcl&&parsedExcl===null) throw new Error(`Ongeldig exclusief btw-bedrag op CSV-regel ${i+1}: ${rawExcl}`);
-    if(rawVat&&parsedVat===null) throw new Error(`Ongeldig btw-bedrag op CSV-regel ${i+1}: ${rawVat}`);
-    if(rawRate&&![0,9,21].includes(parsedRate??-1)) throw new Error(`Ongeldig btw-tarief op CSV-regel ${i+1}: ${rawRate}%`);
+    // Customer-supplied fiscal metadata is never authoritative. Invalid values are
+    // discarded rather than aborting the bank-file import; fiscal classification is
+    // derived independently from the transaction evidence downstream.
+    const safeSubmittedExcl=parsedExcl!==null&&Number.isFinite(parsedExcl)?parsedExcl:undefined;
+    const safeSubmittedVat=parsedVat!==null&&Number.isFinite(parsedVat)?parsedVat:undefined;
+    const safeSubmittedRate=[0,9,21].includes(parsedRate??-1)?parsedRate as BtwPercentage:undefined;
     const submittedSection=submittedSectionIdx>=0?String(row[submittedSectionIdx]??'').trim()||undefined:undefined;
-    output.push({id:occurrence===1?base:`${base}_${occurrence}`,date:date||undefined,description:description||'Transactie',memo:memo||undefined,amount_incl:amount,type,tegenrekening_iban:iban||undefined,submitted_amount_excl:parsedExcl??undefined,submitted_vat_amount:parsedVat??undefined,submitted_vat_percentage:parsedRate as BtwPercentage|undefined,submitted_section:submittedSection});
+    output.push({id:occurrence===1?base:`${base}_${occurrence}`,date:date||undefined,description:description||'Transactie',memo:memo||undefined,amount_incl:amount,type,tegenrekening_iban:iban||undefined,submitted_amount_excl:safeSubmittedExcl,submitted_vat_amount:safeSubmittedVat,submitted_vat_percentage:safeSubmittedRate,submitted_section:submittedSection});
   }
   return output;
 }

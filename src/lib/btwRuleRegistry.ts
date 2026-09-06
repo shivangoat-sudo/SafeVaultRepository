@@ -32,7 +32,8 @@ export type BtwRuleId =
   | 'MEDICINES_AIDS_9'
   | 'BOOKS_PERIODICALS_9'
   | 'WATER_9'
-  | 'HOUSING_WORK_9';
+  | 'HOUSING_WORK_9'
+  | 'INSURANCE_EXEMPT';
 
 export type FiscalKnowledgeRequirement =
   | 'rate'
@@ -240,6 +241,14 @@ export const BTW_RULE_REGISTRY: readonly BtwRule[] = [
     legalBasis: 'Wet OB 1968, art. 9 lid 2 jo. Tabel I',
     requires: ['rate', 'special_regime_conditions'],
     notes: ['Onder meer ouderdom en aard van de woning/werkzaamheid kunnen voorwaarden zijn.'],
+  },
+  {
+    id: 'INSURANCE_EXEMPT',
+    title: 'Verzekeringspremies',
+    result: 'vrijgesteld',
+    legalBasis: 'Belastingdienst – Vrijstelling voor verzekeringen en diensten door tussenpersonen',
+    requires: ['place_of_supply', 'special_regime_conditions'],
+    notes: ['Premies voor verzekeringen zijn vrijgesteld. Andere diensten van een verzekeraar, zoals onderhoudscontracten of bepaalde schade-expertisediensten, kunnen wel belast zijn.'],
   },
 ];
 
