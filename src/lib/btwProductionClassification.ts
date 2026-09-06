@@ -51,7 +51,8 @@ function enrichDeterministicContext(rows: RawTransaction[]): RawTransaction[] {
     if (/\b(?:supermarkt|voedingsmiddelen|boodschappen|levensmiddelen|drinkwater|waterrekening|bloemen|bloemboeket|planten|geneesmiddelen|medicijnen|boek|boeken|dagblad|tijdschrift|periodiek)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, '9% goederen');
     if (/\b(?:kapper|kapsalon|fietsenmaker|fietsreparatie|schoenenreparatie|schoenmaker|kledingreparatie|personenvervoer|taxi|openbaar vervoer|ov-chipkaart|treinreis|busreis|tramreis|metroreis|museum|theater|concert|bioscoop|sportclub|zwembad|sauna)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, '9% dienst');
     if (/\b(?:hotel|overnachting|pension|vakantiehuis|camping)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'logies 21% vanaf 2026');
-    if (/\b(?:kantoorbenodigdheden|bureau|bureaustoel|printer|monitor|laptop|computer|hardware|elektronica|gereedschap|meubilair|meubel|drukwerk|verpakking|brandstof|benzine|diesel|website|hosting|software|licentie|consultancy|advies|accountant|boekhouding|notaris|verzekering|telecom|internet|telefoon)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'algemene 21% prestatie');
+    if (/\b(?:verzekering|assurantie|polis)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'verzekeringspremie vrijgesteld');
+    if (/\b(?:kantoorbenodigdheden|bureau|bureaustoel|printer|monitor|laptop|computer|hardware|elektronica|gereedschap|meubilair|meubel|drukwerk|verpakking|brandstof|benzine|diesel|website|hosting|software|licentie|consultancy|advies|accountant|boekhouding|notaris|telecom|internet|telefoon)\b/i.test(text) && !hasFiscalSignal(text)) return mark(row, 'algemene 21% prestatie');
     return row;
   });
 }
@@ -99,7 +100,8 @@ function patchKnownContexts(report: FiscalReport, sourceRows: RawTransaction[]):
     else if (/path[eé]|museum|theater|concert|bioscoop|sportclub|zwembad|sauna/i.test(text)) { desired = inputClass(9); rate = 9; vat = grossVat(tx.amount_incl_input, 9); excl = netFromGross(tx.amount_incl_input, 9); section = '5b'; explanation = 'Culturele, recreatieve of sportieve toegang; 9%-tarief toegepast.'; }
     else if (/albert\s+heijn\s+zakelijk|supermarkt|voedingsmiddelen|boodschappen|levensmiddelen|drinkwater|waterrekening|bloemen|bloemboeket|planten|geneesmiddelen|medicijnen|boek|boeken|dagblad|tijdschrift|periodiek|kapper|kapsalon|fietsenmaker|fietsreparatie|schoenenreparatie|schoenmaker|kledingreparatie|personenvervoer|taxi|openbaar vervoer|ov-chipkaart|treinreis|busreis|tramreis|metroreis/i.test(text)) { desired = inputClass(9); rate = 9; vat = grossVat(tx.amount_incl_input, 9); excl = netFromGross(tx.amount_incl_input, 9); section = '5b'; explanation = 'Herkenbare Nederlandse 9%-categorie; 9%-tarief toegepast.'; }
     else if (/hotel|overnachting|pension|vakantiehuis|camping/i.test(text)) { desired = inputClass(21); rate = 21; vat = grossVat(tx.amount_incl_input, 21); excl = netFromGross(tx.amount_incl_input, 21); section = '5b'; explanation = 'Logiesprestatie in 2026; 21%-tarief toegepast.'; }
-    else if (/kantoorbenodigdheden|bureau|bureaustoel|printer|monitor|laptop|computer|hardware|elektronica|gereedschap|meubilair|meubel|drukwerk|verpakking|brandstof|benzine|diesel|website|hosting|software|licentie|consultancy|advies|accountant|boekhouding|notaris|verzekering|telecom|internet|telefoon|didi\s+talks|advocatenkantoor|\badvocaat\b/i.test(text)) { desired = inputClass(21); rate = 21; vat = grossVat(tx.amount_incl_input, 21); excl = netFromGross(tx.amount_incl_input, 21); section = '5b'; explanation = 'Herkenbare algemene zakelijke prestatie; 21%-hoofdregel toegepast.'; }
+    else if (/verzekering|assurantie|polis/i.test(text)) { desired = 'exempt_input'; rate = 0; vat = 0; excl = round2(tx.amount_incl_input); section = '5b'; explanation = 'Verzekeringspremie: vrijgesteld van omzetbelasting (art. 11 lid 1 sub k Wet OB 1968), geen btw-aftrek.'; }
+    else if (/kantoorbenodigdheden|bureau|bureaustoel|printer|monitor|laptop|computer|hardware|elektronica|gereedschap|meubilair|meubel|drukwerk|verpakking|brandstof|benzine|diesel|website|hosting|software|licentie|consultancy|advies|accountant|boekhouding|notaris|telecom|internet|telefoon|didi\s+talks|advocatenkantoor|\badvocaat\b/i.test(text)) { desired = inputClass(21); rate = 21; vat = grossVat(tx.amount_incl_input, 21); excl = netFromGross(tx.amount_incl_input, 21); section = '5b'; explanation = 'Herkenbare algemene zakelijke prestatie; 21%-hoofdregel toegepast.'; }
 
     if (!desired || tx.classification === desired) return tx;
 
@@ -125,10 +127,21 @@ function patchKnownContexts(report: FiscalReport, sourceRows: RawTransaction[]):
   const known = transactions.filter(t => t.vat.status === 'known').length;
   const unresolved = transactions.filter(t => t.vat.status === 'unknown').length;
   const included = transactions.filter(t => t.includedInTotals).length;
-  const audit = { ...report.audit, known, unresolved, included, evidenceRequired: transactions.filter(t => t.evidenceRequired).length };
   const netto = round2(output.total - input.total);
-  const remainingProblems = audit.problems.filter(p => !/onvoldoende|unresolved|twijfel/i.test(p));
-  return { ...report, transactions, overzicht: { ...report.overzicht, output, input, nonDeductible, netto, status: netto >= 0 ? 'af_te_drager' : 'terug_te_vorderen' }, aangifte: { ...aangifte, '5a': round2(output.total), '5b': round2(input.total) }, audit: { ...audit, ok: unresolved === 0 && remainingProblems.length === 0, problems: remainingProblems } };
+  // BUGFIX: the "N transactie(s) vereisen boekhoudkundige beoordeling..." message
+  // is generated by the core layer using the unresolved-count BEFORE this
+  // context-patching step resolves additional transactions (e.g. known
+  // merchants/categories). Re-deriving it here — instead of only filtering the
+  // old message out — keeps the shown count in sync with the actual, final
+  // `unresolved` value below, so the accountant never sees a stale/incorrect
+  // "still to review" total.
+  const REVIEW_MESSAGE_PATTERN = /transactie\(s\) vereisen boekhoudkundige beoordeling voordat het rapport fiscaal compleet is\.$/;
+  const otherProblems = report.audit.problems.filter(p => !REVIEW_MESSAGE_PATTERN.test(p));
+  const problems = unresolved > 0
+    ? [...otherProblems, `${unresolved} transactie(s) vereisen boekhoudkundige beoordeling voordat het rapport fiscaal compleet is.`]
+    : otherProblems;
+  const audit = { ...report.audit, known, unresolved, included, evidenceRequired: transactions.filter(t => t.evidenceRequired).length, ok: problems.length === 0, problems };
+  return { ...report, transactions, overzicht: { ...report.overzicht, output, input, nonDeductible, netto, status: netto >= 0 ? 'af_te_drager' : 'terug_te_vorderen' }, aangifte: { ...aangifte, '5a': round2(output.total), '5b': round2(input.total) }, audit };
 }
 
 export function calculateProductionVatReport(rows: RawTransaction[], overrides: Record<string, BoekhouderBeoordeling> = {}, adjustments: FiscalAdjustments = {}): FiscalReport {
