@@ -80,7 +80,7 @@ for (const id of ['collision-path-office', 'collision-cafe-office', 'collision-f
 const supplierBoundaryReport = calculateFiscalVatReport([
   expense('foreign-name-only', 'OpenAI LLC'),
   expense('foreign-name-goods', 'OpenAI LLC hardware aankoop'),
-  expense('eu-name-only', 'Adobe Systems Software'),
+  expense('eu-name-only', 'Adobe Systems'),
   expense('eu-software', 'Adobe Systems Software software licentie'),
 ]);
 assert.equal(supplierBoundaryReport.transactions.find((tx) => tx.id === 'foreign-name-only')?.classification, 'unresolved');
