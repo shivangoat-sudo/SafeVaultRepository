@@ -36,7 +36,7 @@ function hasConflictingContext(text: string): boolean {
   const twentyOne = /\b(?:kantoorbenodigdheden|bureau|bureaustoel|printer|monitor|laptop|computer|hardware|elektronica|gereedschap|meubilair|meubel|drukwerk|verpakking|brandstof|benzine|diesel|website|hosting|software|licentie|consultancy|advies|accountant|boekhouding|notaris|telecom|internet|telefoon|verzekering)\b/i.test(text);
   const noVat = /\b(?:loon|salaris|payroll|nettoloon|dividend|lening|aflossing|belastingdienst|inkomstenbelasting|vennootschapsbelasting|loonheffing|btw-aangifte|belastingaanslag|bankkosten|rekeningkosten|payment fee|transactiekosten|betalingskosten)\b/i.test(text);
   const foreign = NON_EU_SOFTWARE.some(p => p.test(text)) || EU_SOFTWARE.some(p => p.test(text));
-  return (nine && twentyOne) || (foreign && (nine || twentyOne || noVat)) || (noVat && (nine || twentyOne));
+  return (nine && twentyOne) || (foreign && (nine || noVat)) || (noVat && (nine || twentyOne));
 }
 
 function enrichDeterministicContext(rows: RawTransaction[]): RawTransaction[] {
