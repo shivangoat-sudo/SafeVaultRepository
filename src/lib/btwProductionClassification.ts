@@ -29,9 +29,19 @@ function foreignSupplierSignal(row: RawTransaction): 'eu' | 'non_eu' | null {
   return null;
 }
 
+function hasConflictingContext(text: string): boolean {
+  if (!text || hasFiscalSignal(text)) return false;
+  const nine = /\b(?:voedingsmiddelen|levensmiddelen|boodschappen|water|bloemen|bloemboeket|planten|geneesmiddelen|medicijnen|boeken|boek|dagblad|tijdschrift|periodiek|kapper|kapsalon|fietsenmaker|fietsreparatie|schoenenreparatie|schoenmaker|kledingreparatie|personenvervoer|taxi|openbaar vervoer|ov-chipkaart|treinreis|busreis|tramreis|metroreis|museum|theater|concert|bioscoop|sportclub|zwembad|sauna)\b/i.test(text);
+  const twentyOne = /\b(?:kantoorbenodigdheden|bureau|bureaustoel|printer|monitor|laptop|computer|hardware|elektronica|gereedschap|meubilair|meubel|drukwerk|verpakking|brandstof|benzine|diesel|website|hosting|software|licentie|consultancy|advies|accountant|boekhouding|notaris|telecom|internet|telefoon|verzekering)\b/i.test(text);
+  const noVat = /\b(?:loon|salaris|payroll|nettoloon|dividend|lening|aflossing|belastingdienst|inkomstenbelasting|vennootschapsbelasting|loonheffing|btw-aangifte|belastingaanslag|bankkosten|rekeningkosten|payment fee|transactiekosten|betalingskosten)\b/i.test(text);
+  const foreign = NON_EU_SOFTWARE.some(p => p.test(text)) || EU_SOFTWARE.some(p => p.test(text));
+  return (nine && twentyOne) || (foreign && (nine || twentyOne || noVat)) || (noVat && (nine || twentyOne));
+}
+
 function enrichDeterministicContext(rows: RawTransaction[]): RawTransaction[] {
   return rows.map(row => {
     const text = textOf(row);
+    if (hasConflictingContext(text)) return row;
     const foreign = foreignSupplierSignal(row);
     if (foreign === 'non_eu') return mark(row, 'niet-EU verlegging 4a 21%');
     if (foreign === 'eu') return mark(row, 'EU-verlegging 4b 21%');
@@ -71,7 +81,7 @@ function patchKnownContexts(report: FiscalReport, sourceRows: RawTransaction[]):
   const transactions = report.transactions.map((tx): FiscalTransaction => {
     const source = sourceById.get(tx.id);
     const text = `${source ? textOf(source) : ''} ${tx.description ?? ''} ${tx.omschrijving ?? ''}`.toLowerCase();
-    if (/\[safevault:\s*(?:tegenstrijdige fiscale signalen|ambigue bankomschrijving)/i.test(text)) return tx;
+    if (hasConflictingContext(text)) return tx;
     const isNonEuSupplier = /\bopenai(?:\s+llc)?\b|\belevenlabs(?:\s+inc)?\b|\banthropic(?:\s+pbc)?\b|\bnetlify(?:\s+inc)?\b|\bgit(?:hub|hub\s+inc)?\b|\bresend(?:\s+inc)?\b/i.test(text);
     const isEuSupplier = /\badobe\s+systems?\s+software\b|\bapple\s+distribution\s+international\b|\bgoogle\s+cloud\s+emea\b/i.test(text);
     if (tx.type !== 'expense') return tx;
