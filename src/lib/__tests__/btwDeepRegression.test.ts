@@ -76,16 +76,16 @@ for (const id of ['collision-path-office', 'collision-cafe-office', 'collision-f
 }
 
 // Known supplier identity is only a safe fiscal shortcut when the transaction context
-// is also consistent with a software/IT service. A supplier name or a conflicting
-// goods description alone is insufficient evidence for reverse charge.
+// is also consistent with a software/IT service. A supplier name combined with a
+// conflicting 9% category must fail closed instead of letting supplier identity win.
 const supplierBoundaryReport = calculateFiscalVatReport([
   expense('foreign-name-only', 'OpenAI LLC'),
-  expense('foreign-name-goods', 'OpenAI LLC hardware aankoop'),
+  expense('foreign-name-conflict', 'OpenAI LLC boodschappen'),
   expense('eu-name-only', 'Adobe Systems Software'),
   expense('eu-software', 'Adobe Systems Software software licentie'),
 ]);
 assert.equal(supplierBoundaryReport.transactions.find((tx) => tx.id === 'foreign-name-only')?.classification, 'non_eu_reverse_charge');
-assert.equal(supplierBoundaryReport.transactions.find((tx) => tx.id === 'foreign-name-goods')?.classification, 'unresolved');
+assert.equal(supplierBoundaryReport.transactions.find((tx) => tx.id === 'foreign-name-conflict')?.classification, 'unresolved');
 assert.equal(supplierBoundaryReport.transactions.find((tx) => tx.id === 'eu-name-only')?.classification, 'eu_reverse_charge');
 assert.equal(supplierBoundaryReport.transactions.find((tx) => tx.id === 'eu-software')?.classification, 'eu_reverse_charge');
 
