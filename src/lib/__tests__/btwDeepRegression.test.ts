@@ -67,7 +67,7 @@ for (const row of conflictRows) {
 const contextCollisionReport = calculateFiscalVatReport([
   expense('collision-path-office', 'Pathé kantoorbenodigdheden'),
   expense('collision-cafe-office', 'Café De Hoek kantoorbenodigdheden'),
-  expense('collision-foreign-office', 'OpenAI LLC software abonnement kantoorbenodigdheden'),
+  expense('collision-foreign-office', 'OpenAI LLC software abonnement boodschappen'),
   expense('collision-food-office', 'Albert Heijn Zakelijk voedingsmiddelen laptop'),
 ]);
 for (const id of ['collision-path-office', 'collision-cafe-office', 'collision-foreign-office', 'collision-food-office']) {
