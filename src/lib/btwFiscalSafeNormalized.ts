@@ -60,8 +60,9 @@ export function calculateFiscalVatReport(rows: RawTransaction[], overrides: Reco
   const transactions = [...base.transactions.filter((tx) => !blockedIds.has(tx.id)), ...appended];
   const unresolved = transactions.filter((tx) => tx.classification === 'unresolved').length; const known = transactions.length - unresolved; const included = transactions.filter((tx) => tx.includedInTotals).length;
   const unresolvedProblem = `${contradictory.length + ambiguous.length} transactie(s) vereisen boekhoudkundige beoordeling door onvoldoende of tegenstrijdige bankinformatie.`;
-  const filteredBaseProblems = base.audit.problems.filter((problem) => !(unresolved === 0 && /vereisen boekhoudkundige beoordeling voordat het rapport fiscaal compleet is/i.test(problem)));
-  const problems = contradictory.length + ambiguous.length > 0 ? [...filteredBaseProblems.filter((problem) => !/transactie\(s\) vereisen boekhoudkundige beoordeling door onvoldoende of tegenstrijdige bankinformatie/i.test(problem)), unresolvedProblem] : filteredBaseProblems;
+  // The production classifier may already emit a generic unresolved-review warning. The normalized boundary owns the single canonical aggregate warning, so remove all equivalent variants before adding it once.
+  const filteredBaseProblems = base.audit.problems.filter((problem) => !(unresolved > 0 && /vereisen boekhoudkundige beoordeling/i.test(problem)) && !(unresolved === 0 && /vereisen boekhoudkundige beoordeling voordat het rapport fiscaal compleet is/i.test(problem)));
+  const problems = contradictory.length + ambiguous.length > 0 ? [...filteredBaseProblems, unresolvedProblem] : filteredBaseProblems;
   const normalized: FiscalReport = { ...base, transactions, overzicht: { ...base.overzicht, status: base.overzicht.status === 'af_te_drager' ? 'af_te_dragen' : 'terug_te_vorderen' }, audit: { ...base.audit, input: rows.length, known, unresolved, included, evidenceRequired: transactions.filter((tx) => tx.evidenceRequired).length, problems, ok: problems.length === 0 } };
   return addEvidenceState(normalized);
 }
