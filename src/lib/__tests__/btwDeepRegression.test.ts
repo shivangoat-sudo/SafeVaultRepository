@@ -75,8 +75,9 @@ for (const id of ['collision-path-office', 'collision-cafe-office', 'collision-f
   assert.equal(tx.classification, 'unresolved', `${id} must stay unresolved when context conflicts`);
 }
 
-// Known supplier identity is useful transaction context; explicit transaction
-// contradictions still stop it from overriding stronger fiscal evidence.
+// Known supplier identity is only a safe fiscal shortcut when the transaction context
+// is also consistent with a software/IT service. A supplier name or a conflicting
+// goods description alone is insufficient evidence for reverse charge.
 const supplierBoundaryReport = calculateFiscalVatReport([
   expense('foreign-name-only', 'OpenAI LLC'),
   expense('foreign-name-goods', 'OpenAI LLC hardware aankoop'),
@@ -84,7 +85,7 @@ const supplierBoundaryReport = calculateFiscalVatReport([
   expense('eu-software', 'Adobe Systems Software software licentie'),
 ]);
 assert.equal(supplierBoundaryReport.transactions.find((tx) => tx.id === 'foreign-name-only')?.classification, 'non_eu_reverse_charge');
-assert.equal(supplierBoundaryReport.transactions.find((tx) => tx.id === 'foreign-name-goods')?.classification, 'domestic_input_21');
+assert.equal(supplierBoundaryReport.transactions.find((tx) => tx.id === 'foreign-name-goods')?.classification, 'unresolved');
 assert.equal(supplierBoundaryReport.transactions.find((tx) => tx.id === 'eu-name-only')?.classification, 'eu_reverse_charge');
 assert.equal(supplierBoundaryReport.transactions.find((tx) => tx.id === 'eu-software')?.classification, 'eu_reverse_charge');
 
